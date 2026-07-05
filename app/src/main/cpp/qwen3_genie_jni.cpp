@@ -2,6 +2,7 @@
 #include <android/log.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <fstream>
 #include <set>
 #include <memory>
@@ -13,6 +14,7 @@
 
 #include "Genie/GenieCommon.h"
 #include "Genie/GenieDialog.h"
+#include "Genie/GenieProfile.h"
 
 #define LOG_TAG "Qwen3GenieJni"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -66,6 +68,7 @@ std::string collectRuntimeEvidence() {
     std::string line;
     bool hasGenie = false;
     bool hasGenAiTransformer = false;
+    bool hasQnnHtp = false;
     bool hasHtpEvidence = false;
 
     while (std::getline(maps, line)) {
@@ -88,12 +91,14 @@ std::string collectRuntimeEvidence() {
         hasGenie = hasGenie || lower.find("libgenie") != std::string::npos;
         hasGenAiTransformer = hasGenAiTransformer ||
             lower.find("qnngenaitransformer") != std::string::npos;
+        hasQnnHtp = hasQnnHtp || lower.find("libqnnhtp") != std::string::npos;
         hasHtpEvidence = hasHtpEvidence || hasAny(lower, htpTerms);
     }
 
     std::ostringstream out;
     out << "HTP evidence: " << (hasHtpEvidence ? "DETECTED" : "NOT DETECTED") << "\n";
     out << "Genie loaded: " << (hasGenie ? "yes" : "no") << "\n";
+    out << "QnnHtp loaded: " << (hasQnnHtp ? "yes" : "no") << "\n";
     out << "QnnGenAiTransformer loaded: " << (hasGenAiTransformer ? "yes" : "no") << "\n";
     out << "HTP/DSP/RPC terms in loaded maps: " << (hasHtpEvidence ? "yes" : "no") << "\n";
     out << "Matched libraries:";
@@ -123,12 +128,29 @@ void requireFile(const std::string& path) {
     LOGI("Required file readable: %s", path.c_str());
 }
 
+void setEnv(const char* name, const std::string& value) {
+    LOGI("Setting %s=%s", name, value.c_str());
+    setenv(name, value.c_str(), 1);
+}
+
+void configureRuntimePaths(const std::string& modelRoot) {
+    const std::string dspPath = "/vendor/lib/rfsa/adsp;" + modelRoot + ";" +
+        modelRoot + "/dsp;" + modelRoot + "/lib";
+    setEnv("ADSP_LIBRARY_PATH", dspPath);
+    setEnv("CDSP_LIBRARY_PATH", dspPath);
+    setEnv("CDSP1_LIBRARY_PATH", dspPath);
+}
+
 std::string buildConfig(const std::string& modelRoot, int maxTokens, int threadCount) {
-    const std::string tokenizer = modelRoot + "/model/tokenizer.json";
-    const std::string modelBin = modelRoot + "/model/qwen3-0.6b-q4.bin";
+    const std::string tokenizer = modelRoot + "/qwen2.5-0.5b-instruct-tokenizer.json";
+    const std::string htpConfig = modelRoot + "/htp_backend_ext_config.json";
+    const std::string ctxBin1 = modelRoot + "/qwen2.5-0.5b-instruct_qnn229_qcs8550_4096_1_of_2.serialized.bin";
+    const std::string ctxBin2 = modelRoot + "/qwen2.5-0.5b-instruct_qnn229_qcs8550_4096_2_of_2.serialized.bin";
 
     requireFile(tokenizer);
-    requireFile(modelBin);
+    requireFile(htpConfig);
+    requireFile(ctxBin1);
+    requireFile(ctxBin2);
 
     std::ostringstream json;
     json
@@ -138,16 +160,22 @@ std::string buildConfig(const std::string& modelRoot, int maxTokens, int threadC
         << "\"type\":\"basic\","
         << "\"stop-sequence\":[\"<|im_end|>\"],"
         << "\"max-num-tokens\":" << maxTokens << ","
-        << "\"context\":{\"version\":1,\"size\":2048,\"n-vocab\":151936,\"bos-token\":151643,\"eos-token\":151645},"
-        << "\"sampler\":{\"version\":1,\"seed\":42,\"temp\":0.6,\"top-k\":20,\"top-p\":0.95,\"greedy\":true},"
+        << "\"context\":{\"version\":1,\"size\":4096,\"n-vocab\":151936,\"bos-token\":-1,"
+        << "\"eos-token\":[151643,151645],\"pad-token\":151643},"
+        << "\"sampler\":{\"version\":1,\"seed\":42,\"temp\":0.2,\"top-k\":20,\"top-p\":0.8,\"greedy\":false},"
         << "\"tokenizer\":{\"version\":1,\"path\":\"" << tokenizer << "\"},"
         << "\"engine\":{"
         << "\"version\":1,"
         << "\"n-threads\":" << threadCount << ","
-        << "\"backend\":{\"version\":1,\"type\":\"QnnGenAiTransformer\","
-        << "\"QnnGenAiTransformer\":{\"version\":1,\"n-kv-heads\":8,\"kv-quantization\":false,\"shared-engine\":false}},"
-        << "\"model\":{\"version\":1,\"type\":\"library\","
-        << "\"library\":{\"version\":1,\"model-bin\":\"" << modelBin << "\"}}"
+        << "\"backend\":{\"version\":1,\"type\":\"QnnHtp\","
+        << "\"QnnHtp\":{\"version\":1,\"use-mmap\":true,\"spill-fill-bufsize\":0,"
+        << "\"mmap-budget\":0,\"poll\":true,\"cpu-mask\":\"0xe0\",\"kv-dim\":64,"
+        << "\"allow-async-init\":false},"
+        << "\"extensions\":\"" << htpConfig << "\"},"
+        << "\"model\":{\"version\":1,\"type\":\"binary\","
+        << "\"binary\":{\"version\":1,\"ctx-bins\":[\"" << ctxBin1 << "\",\"" << ctxBin2 << "\"]},"
+        << "\"positional-encoding\":{\"type\":\"rope\",\"rope-dim\":32,\"rope-theta\":1000000,"
+        << "\"rope-scaling\":{\"rope-type\":\"default\"}}}"
         << "}"
         << "}"
         << "}";
@@ -163,6 +191,10 @@ std::string statusMessage(const std::string& operation, Genie_Status_t status) {
 struct QueryState {
     std::string text;
 };
+
+void profileAllocCallback(const size_t size, const char** allocatedData) {
+    *allocatedData = static_cast<const char*>(std::malloc(size));
+}
 
 void queryCallback(const char* response,
                    const GenieDialog_SentenceCode_t sentenceCode,
@@ -185,14 +217,26 @@ public:
     explicit GenieSession(const std::string& modelRoot, int maxTokens, int threadCount) {
         LOGI("GenieSession create start, modelRoot=%s, maxTokens=%d, threadCount=%d",
              modelRoot.c_str(), maxTokens, threadCount);
+        configureRuntimePaths(modelRoot);
         std::string configJson = buildConfig(modelRoot, maxTokens, threadCount);
 
+        Genie_Status_t status = GenieProfile_create(nullptr, &profile_);
+        if (status != GENIE_STATUS_SUCCESS || !profile_) {
+            throw std::runtime_error(statusMessage("GenieProfile_create", status));
+        }
+
         LOGI("GenieDialogConfig_createFromJson start, configLength=%zu", configJson.size());
-        Genie_Status_t status = GenieDialogConfig_createFromJson(configJson.c_str(), &config_);
+        status = GenieDialogConfig_createFromJson(configJson.c_str(), &config_);
         if (status != GENIE_STATUS_SUCCESS || !config_) {
             throw std::runtime_error(statusMessage("GenieDialogConfig_createFromJson", status));
         }
         LOGI("GenieDialogConfig_createFromJson success");
+
+        status = GenieDialogConfig_bindProfiler(config_, profile_);
+        if (status != GENIE_STATUS_SUCCESS) {
+            throw std::runtime_error(statusMessage("GenieDialogConfig_bindProfiler", status));
+        }
+        LOGI("GenieDialogConfig_bindProfiler success");
 
         LOGI("GenieDialog_create start");
         status = GenieDialog_create(config_, &dialog_);
@@ -217,6 +261,14 @@ public:
                 LOGE("GenieDialogConfig_free failed: %d", status);
             }
             config_ = nullptr;
+        }
+
+        if (profile_) {
+            Genie_Status_t status = GenieProfile_free(profile_);
+            if (status != GENIE_STATUS_SUCCESS) {
+                LOGE("GenieProfile_free failed: %d", status);
+            }
+            profile_ = nullptr;
         }
     }
 
@@ -244,9 +296,25 @@ public:
         return state.text;
     }
 
+    std::string profileJson() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!profile_) {
+            return "{}";
+        }
+        const char* jsonData = nullptr;
+        Genie_Status_t status = GenieProfile_getJsonData(profile_, profileAllocCallback, &jsonData);
+        if (status != GENIE_STATUS_SUCCESS) {
+            return statusMessage("GenieProfile_getJsonData", status);
+        }
+        std::string result(jsonData ? jsonData : "");
+        std::free(const_cast<char*>(jsonData));
+        return result;
+    }
+
 private:
     GenieDialogConfig_Handle_t config_ = nullptr;
     GenieDialog_Handle_t dialog_ = nullptr;
+    GenieProfile_Handle_t profile_ = nullptr;
     std::mutex mutex_;
 };
 
@@ -318,6 +386,20 @@ Java_com_qairt_qwen3geniedemo_GenieNative_query(JNIEnv* env,
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_qairt_qwen3geniedemo_GenieNative_runtimeEvidence(JNIEnv* env, jclass) {
     return toJString(env, collectRuntimeEvidence());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_qairt_qwen3geniedemo_GenieNative_profileJson(JNIEnv* env, jclass, jlong handle) {
+    try {
+        auto* session = reinterpret_cast<GenieSession*>(handle);
+        if (!session) {
+            throw std::runtime_error("Native Genie session is not initialized.");
+        }
+        return toJString(env, session->profileJson());
+    } catch (const std::exception& e) {
+        throwJava(env, e);
+        return nullptr;
+    }
 }
 
 extern "C" JNIEXPORT void JNICALL

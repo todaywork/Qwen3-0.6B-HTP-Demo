@@ -18,11 +18,14 @@ import android.widget.TextView;
 import java.io.File;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 public class MainActivity extends Activity {
     private static final String TAG = "Qwen3GenieDemo";
-    private static final int MAX_TOKENS = 64;
-    private static final int THREAD_COUNT = 6;
+    private static final int MAX_TOKENS = 32;
+    private static final int THREAD_COUNT = 3;
+    private static final String SYSTEM_PROMPT = "You are a vehicle assistant. Reply briefly in Chinese.";
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -76,7 +79,7 @@ public class MainActivity extends Activity {
         scrollView.addView(root, new ScrollView.LayoutParams(-1, -2));
 
         TextView title = new TextView(this);
-        title.setText("Qwen3 Genie JNI Demo");
+        title.setText("Qwen2.5 QNN HTP Demo");
         title.setTextSize(22);
         title.setGravity(Gravity.CENTER_HORIZONTAL);
         root.addView(title, new LinearLayout.LayoutParams(-1, -2));
@@ -89,7 +92,7 @@ public class MainActivity extends Activity {
 
         promptEdit = new EditText(this);
         promptEdit.setMinLines(3);
-        promptEdit.setText("Explain artificial intelligence in one sentence.");
+        promptEdit.setText("把空调调到24度，只回答意图。");
         promptEdit.setGravity(Gravity.TOP | Gravity.START);
         root.addView(promptEdit, new LinearLayout.LayoutParams(-1, -2));
 
@@ -108,20 +111,21 @@ public class MainActivity extends Activity {
         metricsView.setText(defaultMetricsText());
         root.addView(metricsView, new LinearLayout.LayoutParams(-1, -2));
 
+        outputView = new TextView(this);
+        outputView.setTextSize(15);
+        outputView.setMovementMethod(new ScrollingMovementMethod());
+        outputView.setText("Output will appear here.");
+        outputView.setMinLines(3);
+        LinearLayout.LayoutParams outputParams = new LinearLayout.LayoutParams(-1, -2);
+        outputParams.topMargin = dp(8);
+        outputParams.bottomMargin = dp(8);
+        root.addView(outputView, outputParams);
+
         evidenceView = new TextView(this);
         evidenceView.setTextSize(13);
         evidenceView.setPadding(0, dp(8), 0, dp(8));
         evidenceView.setText("Runtime evidence\nNot collected yet.");
         root.addView(evidenceView, new LinearLayout.LayoutParams(-1, -2));
-
-        outputView = new TextView(this);
-        outputView.setTextSize(15);
-        outputView.setMovementMethod(new ScrollingMovementMethod());
-        outputView.setText("Output will appear here.");
-        outputView.setMinLines(8);
-        LinearLayout.LayoutParams outputParams = new LinearLayout.LayoutParams(-1, -2);
-        outputParams.topMargin = dp(12);
-        root.addView(outputView, outputParams);
 
         return scrollView;
     }
@@ -129,7 +133,9 @@ public class MainActivity extends Activity {
     private String defaultStatusText() {
         File modelRoot = getModelRoot();
         return "Genie: " + GenieNative.version()
-                + "\nModel root: " + modelRoot.getAbsolutePath();
+                + "\nRoute: Genie / QnnHtp / Qwen2.5-0.5B / SM8550 V73"
+                + "\nModel root: " + modelRoot.getAbsolutePath()
+                + "\nQuality note: HTP natural-language quality baseline.";
     }
 
     private String defaultMetricsText() {
@@ -140,6 +146,11 @@ public class MainActivity extends Activity {
                 + "Prompt chars: -\n"
                 + "Output chars: -\n"
                 + "Output chars/s: -\n"
+                + "Prompt tokens: -\n"
+                + "Generated tokens: -\n"
+                + "TTFT: -\n"
+                + "Prompt rate: -\n"
+                + "Token rate: -\n"
                 + "Max tokens: " + MAX_TOKENS + " | Threads: " + THREAD_COUNT;
     }
 
@@ -151,6 +162,11 @@ public class MainActivity extends Activity {
                 + "Prompt chars: " + metrics.promptChars + "\n"
                 + "Output chars: " + metrics.outputChars + "\n"
                 + "Output chars/s: " + formatRate(metrics.outputCharsPerSecond) + "\n"
+                + "Prompt tokens: " + metrics.profile.promptTokens + "\n"
+                + "Generated tokens: " + metrics.profile.generatedTokens + "\n"
+                + "TTFT: " + formatMicrosAsMs(metrics.profile.timeToFirstTokenUs) + "\n"
+                + "Prompt rate: " + formatRate(metrics.profile.promptTokensPerSecond) + " tok/s\n"
+                + "Token rate: " + formatRate(metrics.profile.generatedTokensPerSecond) + " tok/s\n"
                 + "Max tokens: " + MAX_TOKENS + " | Threads: " + THREAD_COUNT;
     }
 
@@ -162,12 +178,17 @@ public class MainActivity extends Activity {
         return String.format(java.util.Locale.US, "%.1f", value);
     }
 
+    private String formatMicrosAsMs(long value) {
+        return value < 0 ? "-" : String.format(java.util.Locale.US, "%.3f ms", value / 1000.0);
+    }
+
     private File getModelRoot() {
-        return new File("/data/local/tmp/qwen3-0.6b-genaitransformer");
+        return new File("/data/local/tmp/genie_qwen25_quality");
     }
 
     private void runQuery() {
-        String prompt = promptEdit.getText().toString();
+        String userPrompt = promptEdit.getText().toString();
+        String prompt = buildChatPrompt(userPrompt);
         File modelRoot = getModelRoot();
         Log.i(TAG, "runQuery start, modelRoot=" + modelRoot.getAbsolutePath()
                 + ", promptLength=" + prompt.length());
@@ -191,6 +212,7 @@ public class MainActivity extends Activity {
                 long start = System.nanoTime();
                 Log.i(TAG, "Native query start.");
                 String result = GenieNative.query(nativeHandle, prompt);
+                ProfileMetrics profile = parseProfileMetrics(GenieNative.profileJson(nativeHandle));
                 long queryMs = (System.nanoTime() - start) / 1_000_000L;
                 long totalMs = (System.nanoTime() - totalStart) / 1_000_000L;
                 int outputChars = result == null ? 0 : result.length();
@@ -199,9 +221,10 @@ public class MainActivity extends Activity {
                         createMsForRun,
                         queryMs,
                         totalMs,
-                        prompt.length(),
+                        userPrompt.length(),
                         outputChars,
-                        outputCharsPerSecond);
+                        outputCharsPerSecond,
+                        profile);
                 String evidence = GenieNative.runtimeEvidence();
                 Log.i(TAG, "Runtime evidence:\n" + evidence);
                 Log.i(TAG, "Native query finished, queryMs=" + queryMs
@@ -234,6 +257,61 @@ public class MainActivity extends Activity {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
+    private String buildChatPrompt(String userPrompt) {
+        return "<|im_start|>system\n"
+                + SYSTEM_PROMPT
+                + "<|im_end|>\n"
+                + "<|im_start|>user\n"
+                + userPrompt
+                + "<|im_end|>\n"
+                + "<|im_start|>assistant\n";
+    }
+
+    private ProfileMetrics parseProfileMetrics(String profileJson) {
+        ProfileMetrics empty = new ProfileMetrics();
+        try {
+            JSONObject root = new JSONObject(profileJson == null ? "{}" : profileJson);
+            JSONArray components = root.optJSONArray("components");
+            if (components == null) {
+                return empty;
+            }
+            for (int i = 0; i < components.length(); i++) {
+                JSONObject component = components.optJSONObject(i);
+                if (component == null) {
+                    continue;
+                }
+                JSONArray events = component.optJSONArray("events");
+                if (events == null) {
+                    continue;
+                }
+                for (int j = 0; j < events.length(); j++) {
+                    JSONObject event = events.optJSONObject(j);
+                    if (event == null || !"GenieDialog_query".equals(event.optString("type"))) {
+                        continue;
+                    }
+                    empty.promptTokens = metricLong(event, "num-prompt-tokens");
+                    empty.generatedTokens = metricLong(event, "num-generated-tokens");
+                    empty.timeToFirstTokenUs = metricLong(event, "time-to-first-token");
+                    empty.promptTokensPerSecond = metricDouble(event, "prompt-processing-rate");
+                    empty.generatedTokensPerSecond = metricDouble(event, "token-generation-rate");
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to parse Genie profile JSON.", e);
+        }
+        return empty;
+    }
+
+    private long metricLong(JSONObject event, String key) {
+        JSONObject metric = event.optJSONObject(key);
+        return metric == null ? -1 : metric.optLong("value", -1);
+    }
+
+    private double metricDouble(JSONObject event, String key) {
+        JSONObject metric = event.optJSONObject(key);
+        return metric == null ? 0.0 : metric.optDouble("value", 0.0);
+    }
+
     private static final class RunMetrics {
         final long sessionCreateMs;
         final long queryMs;
@@ -241,19 +319,30 @@ public class MainActivity extends Activity {
         final int promptChars;
         final int outputChars;
         final double outputCharsPerSecond;
+        final ProfileMetrics profile;
 
         RunMetrics(long sessionCreateMs,
                    long queryMs,
                    long totalMs,
                    int promptChars,
                    int outputChars,
-                   double outputCharsPerSecond) {
+                   double outputCharsPerSecond,
+                   ProfileMetrics profile) {
             this.sessionCreateMs = sessionCreateMs;
             this.queryMs = queryMs;
             this.totalMs = totalMs;
             this.promptChars = promptChars;
             this.outputChars = outputChars;
             this.outputCharsPerSecond = outputCharsPerSecond;
+            this.profile = profile;
         }
+    }
+
+    private static final class ProfileMetrics {
+        long promptTokens = -1;
+        long generatedTokens = -1;
+        long timeToFirstTokenUs = -1;
+        double promptTokensPerSecond = 0.0;
+        double generatedTokensPerSecond = 0.0;
     }
 }

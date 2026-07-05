@@ -3,14 +3,17 @@
         android:allowBackup="false"
         android:extractNativeLibs="true"
         android:icon="@drawable/ic_launcher"
-        android:label="Qwen3 Genie Demo"
+        android:label="Qwen2.5 HTP Demo"
         android:roundIcon="@drawable/ic_launcher"
         android:theme="@style/AppTheme">
+        <uses-native-library android:name="libcdsprpc.so" android:required="false" />
+        <uses-native-library android:name="libadsprpc.so" android:required="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:icon="@drawable/ic_launcher"
-            android:label="Qwen3 Genie Demo">
+            android:label="Qwen2.5 HTP Demo">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

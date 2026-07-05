@@ -8,10 +8,8 @@ public final class GenieNative {
     static {
         Log.i(TAG, "Loading native library: QnnSystem");
         System.loadLibrary("QnnSystem");
-        Log.i(TAG, "Loading native library: QnnGenAiTransformerModel");
-        System.loadLibrary("QnnGenAiTransformerModel");
-        Log.i(TAG, "Loading native library: QnnGenAiTransformer");
-        System.loadLibrary("QnnGenAiTransformer");
+        Log.i(TAG, "Loading native library: QnnHtp");
+        System.loadLibrary("QnnHtp");
         Log.i(TAG, "Loading native library: Genie");
         System.loadLibrary("Genie");
         Log.i(TAG, "Loading native library: qwen3genie");
@@ -29,6 +27,8 @@ public final class GenieNative {
     public static native String query(long handle, String prompt);
 
     public static native String runtimeEvidence();
+
+    public static native String profileJson(long handle);
 
     public static native void release(long handle);
 }
