@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
         android:allowBackup="false"
-        android:extractNativeLibs="true"
+        android:extractNativeLibs="false"
         android:icon="@drawable/ic_launcher"
         android:label="Qwen2.5 HTP Demo"
         android:roundIcon="@drawable/ic_launcher"
@@ -21,3 +21,4 @@
         </activity>
     </application>
 </manifest>
+

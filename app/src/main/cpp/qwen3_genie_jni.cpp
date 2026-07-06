@@ -2,6 +2,7 @@
 #include <android/log.h>
 
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <set>
@@ -14,6 +15,7 @@
 
 #include "Genie/GenieCommon.h"
 #include "Genie/GenieDialog.h"
+#include "Genie/GenieLog.h"
 #include "Genie/GenieProfile.h"
 
 #define LOG_TAG "Qwen3GenieJni"
@@ -97,9 +99,6 @@ std::string collectRuntimeEvidence() {
 
     std::ostringstream out;
     out << "HTP evidence: " << (hasHtpEvidence ? "DETECTED" : "NOT DETECTED") << "\n";
-    out << "Genie loaded: " << (hasGenie ? "yes" : "no") << "\n";
-    out << "QnnHtp loaded: " << (hasQnnHtp ? "yes" : "no") << "\n";
-    out << "QnnGenAiTransformer loaded: " << (hasGenAiTransformer ? "yes" : "no") << "\n";
     out << "HTP/DSP/RPC terms in loaded maps: " << (hasHtpEvidence ? "yes" : "no") << "\n";
     out << "Matched libraries:";
 
@@ -117,6 +116,54 @@ std::string collectRuntimeEvidence() {
     }
 
     return out.str();
+}
+
+const char* genieLogLevelName(GenieLog_Level_t level) {
+    switch (level) {
+        case GENIE_LOG_LEVEL_ERROR:
+            return "ERROR";
+        case GENIE_LOG_LEVEL_WARN:
+            return "WARN";
+        case GENIE_LOG_LEVEL_INFO:
+            return "INFO";
+        case GENIE_LOG_LEVEL_VERBOSE:
+            return "VERBOSE";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+int genieLogPriority(GenieLog_Level_t level) {
+    switch (level) {
+        case GENIE_LOG_LEVEL_ERROR:
+            return ANDROID_LOG_ERROR;
+        case GENIE_LOG_LEVEL_WARN:
+            return ANDROID_LOG_WARN;
+        case GENIE_LOG_LEVEL_INFO:
+            return ANDROID_LOG_INFO;
+        case GENIE_LOG_LEVEL_VERBOSE:
+            return ANDROID_LOG_VERBOSE;
+        default:
+            return ANDROID_LOG_DEBUG;
+    }
+}
+
+void genieLogCallback(const GenieLog_Handle_t,
+                      const char* fmt,
+                      GenieLog_Level_t level,
+                      uint64_t timestamp,
+                      va_list args) {
+    char message[2048];
+    va_list copy;
+    va_copy(copy, args);
+    std::vsnprintf(message, sizeof(message), fmt ? fmt : "", copy);
+    va_end(copy);
+    __android_log_print(genieLogPriority(level),
+                        "QNN_GENIE_LOG",
+                        "[%s][%llu] %s",
+                        genieLogLevelName(level),
+                        static_cast<unsigned long long>(timestamp),
+                        message);
 }
 
 void requireFile(const std::string& path) {
@@ -151,6 +198,11 @@ std::string buildConfig(const std::string& modelRoot, int maxTokens, int threadC
     requireFile(htpConfig);
     requireFile(ctxBin1);
     requireFile(ctxBin2);
+
+    LOGI("QNN_BACKEND_PROOF backend=QnnHtp extensions=%s ctxBin1=%s ctxBin2=%s",
+         htpConfig.c_str(),
+         ctxBin1.c_str(),
+         ctxBin2.c_str());
 
     std::ostringstream json;
     json
@@ -232,6 +284,19 @@ public:
         }
         LOGI("GenieDialogConfig_createFromJson success");
 
+        status = GenieLog_create(nullptr, genieLogCallback, GENIE_LOG_LEVEL_VERBOSE, &log_);
+        if (status != GENIE_STATUS_SUCCESS || !log_) {
+            LOGE("GenieLog_create failed, status=%d", status);
+        } else {
+            LOGI("GenieLog_create success, level=VERBOSE");
+            status = GenieDialogConfig_bindLogger(config_, log_);
+            if (status != GENIE_STATUS_SUCCESS) {
+                LOGE("GenieDialogConfig_bindLogger failed, status=%d", status);
+            } else {
+                LOGI("GenieDialogConfig_bindLogger success");
+            }
+        }
+
         status = GenieDialogConfig_bindProfiler(config_, profile_);
         if (status != GENIE_STATUS_SUCCESS) {
             throw std::runtime_error(statusMessage("GenieDialogConfig_bindProfiler", status));
@@ -261,6 +326,14 @@ public:
                 LOGE("GenieDialogConfig_free failed: %d", status);
             }
             config_ = nullptr;
+        }
+
+        if (log_) {
+            Genie_Status_t status = GenieLog_free(log_);
+            if (status != GENIE_STATUS_SUCCESS) {
+                LOGE("GenieLog_free failed: %d", status);
+            }
+            log_ = nullptr;
         }
 
         if (profile_) {
@@ -334,6 +407,7 @@ private:
     GenieDialogConfig_Handle_t config_ = nullptr;
     GenieDialog_Handle_t dialog_ = nullptr;
     GenieProfile_Handle_t profile_ = nullptr;
+    GenieLog_Handle_t log_ = nullptr;
     std::mutex mutex_;
 };
 

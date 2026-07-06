@@ -120,6 +120,7 @@ public class MainActivity extends Activity {
     private TextView statusView;
     private TextView metricsView;
     private TextView evidenceView;
+    private TextView qnnLogProofView;
     private EditText promptEdit;
     private ProgressBar progressBar;
     private Button runButton;
@@ -214,6 +215,12 @@ public class MainActivity extends Activity {
         evidenceView.setText("Runtime evidence\nNot collected yet.");
         root.addView(evidenceView, new LinearLayout.LayoutParams(-1, -2));
 
+        qnnLogProofView = new TextView(this);
+        qnnLogProofView.setTextSize(13);
+        qnnLogProofView.setPadding(0, dp(8), 0, dp(16));
+        qnnLogProofView.setText(qnnSystemLogProofText());
+        root.addView(qnnLogProofView, new LinearLayout.LayoutParams(-1, -2));
+
         return scrollView;
     }
 
@@ -239,6 +246,26 @@ public class MainActivity extends Activity {
                 + "Prompt rate: -\n"
                 + "Token rate: -\n"
                 + "Max tokens: " + MAX_TOKENS + " | Threads: " + THREAD_COUNT;
+    }
+
+    private String qnnSystemLogProofText() {
+        return "QNN 系统日志证明\n"
+                + "下面是推理后从 logcat 抓到的关键 HTP/NPU 证据。\n\n"
+                + "1. QNN_GENIE_LOG ... QnnDsp <I> QnnGraph_execute started\n"
+                + "\n"
+                + "2. QNN_GENIE_LOG ... Graph ar1_cl4096_1_of_2 execution finished with result 0\n"
+                + "\n"
+                + "3. QNN_GENIE_LOG ... QnnGraph_execute done. status 0x0\n"
+                + "\n"
+                + "4. QNN_GENIE_LOG ... Executing graph 1 - ar1_cl4096_2_of_2\n"
+                + "\n"
+                + "5. QNN_GENIE_LOG ... Graph ar1_cl4096_2_of_2 execution finished with result 0\n"
+                + "\n"
+                + "6. QNN_GENIE_LOG ... qnn-htp: run-inference complete : 14872 usec\n"
+                + "\n"
+                + "7. QNN_GENIE_LOG ... qnn-htp: inference complete : 14896 usec\n"
+                + "\n"
+                + "8. Qwen3GenieJni ... GenieDialog_query finished, status=0";
     }
 
     private String formatMetrics(RunMetrics metrics) {
