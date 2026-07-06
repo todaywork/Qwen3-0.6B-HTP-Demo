@@ -272,6 +272,25 @@ public:
         }
     }
 
+    std::string warmup(const std::string& systemPrompt) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        QueryState state;
+        LOGI("GenieDialog_query warmup start, promptLength=%zu", systemPrompt.size());
+        Genie_Status_t status = GenieDialog_query(
+            dialog_,
+            systemPrompt.c_str(),
+            GENIE_DIALOG_SENTENCE_BEGIN,
+            queryCallback,
+            &state);
+
+        if (status != GENIE_STATUS_SUCCESS && status != GENIE_STATUS_WARNING_CONTEXT_EXCEEDED) {
+            throw std::runtime_error(statusMessage("GenieDialog_query warmup", status));
+        }
+        LOGI("GenieDialog_query warmup finished, status=%d, resultLength=%zu",
+             status, state.text.size());
+        return state.text;
+    }
+
     std::string query(const std::string& prompt) {
         std::lock_guard<std::mutex> lock(mutex_);
         QueryState state;
@@ -280,7 +299,7 @@ public:
         Genie_Status_t status = GenieDialog_query(
             dialog_,
             prompt.c_str(),
-            GENIE_DIALOG_SENTENCE_COMPLETE,
+            GENIE_DIALOG_SENTENCE_END,
             queryCallback,
             &state);
 
@@ -363,6 +382,23 @@ Java_com_qairt_qwen3geniedemo_GenieNative_create(JNIEnv* env,
     } catch (const std::exception& e) {
         throwJava(env, e);
         return 0;
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_qairt_qwen3geniedemo_GenieNative_warmup(JNIEnv* env,
+                                                 jclass,
+                                                 jlong handle,
+                                                 jstring systemPrompt) {
+    try {
+        auto* session = reinterpret_cast<GenieSession*>(handle);
+        if (!session) {
+            throw std::runtime_error("Native Genie session is not initialized.");
+        }
+        return toJString(env, session->warmup(toString(env, systemPrompt)));
+    } catch (const std::exception& e) {
+        throwJava(env, e);
+        return nullptr;
     }
 }
 

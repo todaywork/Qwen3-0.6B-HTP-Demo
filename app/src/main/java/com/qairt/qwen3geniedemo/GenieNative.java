@@ -24,6 +24,8 @@ public final class GenieNative {
 
     public static native long create(String modelRoot, int maxTokens, int threadCount);
 
+    public static native String warmup(long handle, String systemPrompt);
+
     public static native String query(long handle, String prompt);
 
     public static native String runtimeEvidence();
