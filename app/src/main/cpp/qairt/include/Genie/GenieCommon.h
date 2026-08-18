@@ -37,7 +37,7 @@ extern "C" {
 
 // Provide values to use for the Genie API version.
 #define GENIE_API_VERSION_MAJOR 1
-#define GENIE_API_VERSION_MINOR 18
+#define GENIE_API_VERSION_MINOR 17
 #define GENIE_API_VERSION_PATCH 0
 
 //=============================================================================

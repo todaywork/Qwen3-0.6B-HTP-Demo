@@ -3,15 +3,21 @@ plugins {
 }
 
 android {
-    namespace "com.qairt.qwen3geniedemo"
+    namespace "com.qairt.qwen3htp"
     compileSdk 35
 
     defaultConfig {
-        applicationId "com.qairt.qwen3geniedemo"
+        applicationId "com.qairt.qwen3htp"
         minSdk 26
         targetSdk 35
         versionCode 1
         versionName "1.0"
+
+        def diagnosticsEnabled = providers.gradleProperty("enableNpuDiagnostics")
+                .map { it.toBoolean() }
+                .orElse(true)
+                .get()
+        buildConfigField "boolean", "NPU_DIAGNOSTICS_ENABLED", diagnosticsEnabled.toString()
 
         ndk {
             abiFilters "arm64-v8a"
@@ -22,6 +28,10 @@ android {
                 cppFlags "-std=c++17 -fexceptions -frtti"
             }
         }
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     externalNativeBuild {
@@ -38,3 +48,9 @@ android {
     }
 }
 
+dependencies {
+    implementation "androidx.core:core:1.13.1"
+    if (findProject(":npu-diagnostics") != null) {
+        implementation project(":npu-diagnostics")
+    }
+}

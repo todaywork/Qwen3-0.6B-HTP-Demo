@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(qwen3genie)
 
+set(QAIRT_ROOT "E:/QualComm/AIStack/QAIRT/2.45.0.260326")
+
 add_library(qwen3genie SHARED qwen3_genie_jni.cpp)
 
 target_include_directories(qwen3genie PRIVATE

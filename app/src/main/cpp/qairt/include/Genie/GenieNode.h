@@ -47,7 +47,7 @@ typedef enum {
   GENIE_NODE_SENTENCE_END = 3,
   /// The query has been aborted.
   GENIE_NODE_SENTENCE_ABORT = 4,
-  /// Rewind the KV cache as per prefix query match before processing the query.
+  /// Rewind the KV cache as per prefix query match before processing the query
   GENIE_NODE_SENTENCE_REWIND = 5,
 } GenieNode_TextOutput_SentenceCode_t;
 
@@ -77,10 +77,7 @@ typedef enum {
 
   GENIE_NODE_LM_EXECUTOR_TOKEN_INPUT     = 400,
   GENIE_NODE_LM_EXECUTOR_EMBEDDING_INPUT = 401,
-  GENIE_NODE_LM_EXECUTOR_LOGIT_OUTPUT    = 450,
-
-  // Unspecified I/O name. Connects any identically-named tensors between nodes.
-  GENIE_NODE_WILDCARD = 1000
+  GENIE_NODE_LM_EXECUTOR_LOGIT_OUTPUT    = 450
 } GenieNode_IOName_t;
 
 /**

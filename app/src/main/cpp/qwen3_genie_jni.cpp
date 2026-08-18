@@ -2,8 +2,10 @@
 #include <android/log.h>
 
 #include <chrono>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <set>
 #include <memory>
@@ -12,6 +14,9 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "Genie/GenieCommon.h"
 #include "Genie/GenieDialog.h"
@@ -166,13 +171,62 @@ void genieLogCallback(const GenieLog_Handle_t,
                         message);
 }
 
+std::string formatTokenIds(const int32_t* tokenIds, uint32_t count) {
+    std::ostringstream ss;
+    ss << "[";
+    for (uint32_t i = 0; tokenIds && i < count; ++i) {
+        if (i > 0) ss << ",";
+        ss << tokenIds[i];
+    }
+    ss << "]";
+    return ss.str();
+}
+
+void logTokenIds(const char* tag, const int32_t* tokenIds, uint32_t count) {
+    const std::string ids = formatTokenIds(tokenIds, count);
+    if (!tokenIds || count == 0) {
+        LOGI("%s tokenIds=%s count=0", tag, ids.c_str());
+        return;
+    }
+    // Truncate log if too long to avoid logcat truncation
+    if (ids.size() > 4000) {
+        LOGI("%s tokenCount=%u, tokenIds(truncated, first 200)=%s...",
+             tag, count, ids.substr(0, 4000).c_str());
+    } else {
+        LOGI("%s tokenCount=%u, tokenIds=%s", tag, count, ids.c_str());
+    }
+}
+
 void requireFile(const std::string& path) {
     LOGI("Checking required file: %s", path.c_str());
+
+    struct stat fileStat {};
+    if (stat(path.c_str(), &fileStat) != 0) {
+        const int error = errno;
+        throw std::runtime_error("Required file stat failed: " + path +
+                                 ", errno=" + std::to_string(error) +
+                                 " (" + std::strerror(error) + ")");
+    }
+    if (!S_ISREG(fileStat.st_mode)) {
+        throw std::runtime_error("Required path is not a regular file: " + path);
+    }
+    if (access(path.c_str(), R_OK) != 0) {
+        const int error = errno;
+        throw std::runtime_error("Required file is not readable: " + path +
+                                 ", errno=" + std::to_string(error) +
+                                 " (" + std::strerror(error) + ")");
+    }
+
     std::ifstream in(path, std::ios::binary);
     if (!in.good()) {
-        throw std::runtime_error("Missing required file: " + path);
+        const int error = errno;
+        throw std::runtime_error("Required file open failed: " + path +
+                                 ", errno=" + std::to_string(error) +
+                                 " (" + std::strerror(error) + ")");
     }
-    LOGI("Required file readable: %s", path.c_str());
+    LOGI("Required file readable: %s, size=%lld",
+         path.c_str(),
+         static_cast<long long>(fileStat.st_size));
 }
 
 void setEnv(const char* name, const std::string& value) {
@@ -188,18 +242,28 @@ void configureRuntimePaths(const std::string& modelRoot) {
     setEnv("CDSP1_LIBRARY_PATH", dspPath);
 }
 
-std::string buildConfig(const std::string& modelRoot, int maxTokens, int threadCount) {
-    const std::string tokenizer = modelRoot + "/qwen2.5-0.5b-instruct-tokenizer.json";
+std::string buildConfig(const std::string& modelRoot,
+                        int contextSize,
+                        int maxOutputTokens,
+                        int threadCount,
+                        bool greedy,
+                        int topK,
+                        float topP,
+                        float temperature,
+                        float presencePenalty) {
+    const std::string tokenizer = modelRoot + "/tokenizer.json";
     const std::string htpConfig = modelRoot + "/htp_backend_ext_config.json";
-    const std::string ctxBin1 = modelRoot + "/qwen2.5-0.5b-instruct_qnn229_qcs8550_4096_1_of_2.serialized.bin";
-    const std::string ctxBin2 = modelRoot + "/qwen2.5-0.5b-instruct_qnn229_qcs8550_4096_2_of_2.serialized.bin";
+    const std::string ctxBin1 = modelRoot + "/part1_of_2.bin";
+    const std::string ctxBin2 = modelRoot + "/part2_of_2.bin";
+    const std::string htpSkel = modelRoot + "/dsp/libQnnHtpV73Skel.so";
 
     requireFile(tokenizer);
     requireFile(htpConfig);
     requireFile(ctxBin1);
     requireFile(ctxBin2);
+    requireFile(htpSkel);
 
-    LOGI("QNN_BACKEND_PROOF backend=QnnHtp extensions=%s ctxBin1=%s ctxBin2=%s",
+    LOGI("QNN_BACKEND_PROOF backend=QnnHtp extensions=%s ctxBins=[%s,%s]",
          htpConfig.c_str(),
          ctxBin1.c_str(),
          ctxBin2.c_str());
@@ -211,23 +275,28 @@ std::string buildConfig(const std::string& modelRoot, int maxTokens, int threadC
         << "\"version\":1,"
         << "\"type\":\"basic\","
         << "\"stop-sequence\":[\"<|im_end|>\"],"
-        << "\"max-num-tokens\":" << maxTokens << ","
-        << "\"context\":{\"version\":1,\"size\":4096,\"n-vocab\":151936,\"bos-token\":-1,"
-        << "\"eos-token\":[151643,151645],\"pad-token\":151643},"
-        << "\"sampler\":{\"version\":1,\"seed\":42,\"temp\":0.2,\"top-k\":20,\"top-p\":0.8,\"greedy\":false},"
+        << "\"max-num-tokens\":" << maxOutputTokens << ","
+        << "\"context\":{\"version\":1,\"size\":" << contextSize
+        << ",\"n-vocab\":151936,"
+        << "\"bos-token\":151643,\"eos-token\":151645},"
+        << "\"sampler\":{\"version\":1,\"seed\":42,\"temp\":" << temperature
+        << ",\"top-k\":" << topK << ",\"top-p\":" << topP
+        << ",\"greedy\":" << (greedy ? "true" : "false")
+        << ",\"token-penalty\":{\"version\":1,\"penalize-last-n\":128,"
+        << "\"repetition-penalty\":1.0,\"presence-penalty\":" << presencePenalty
+        << ",\"frequency-penalty\":0.0}},"
         << "\"tokenizer\":{\"version\":1,\"path\":\"" << tokenizer << "\"},"
         << "\"engine\":{"
         << "\"version\":1,"
         << "\"n-threads\":" << threadCount << ","
         << "\"backend\":{\"version\":1,\"type\":\"QnnHtp\","
         << "\"QnnHtp\":{\"version\":1,\"use-mmap\":true,\"spill-fill-bufsize\":0,"
-        << "\"mmap-budget\":0,\"poll\":true,\"cpu-mask\":\"0xe0\",\"kv-dim\":64,"
-        << "\"allow-async-init\":false},"
+        << "\"mmap-budget\":0,\"poll\":false,\"cpu-mask\":\"0xe0\",\"kv-dim\":128,"
+        << "\"allow-async-init\":false,\"pos-id-dim\":64,\"rope-theta\":1000000},"
         << "\"extensions\":\"" << htpConfig << "\"},"
         << "\"model\":{\"version\":1,\"type\":\"binary\","
-        << "\"binary\":{\"version\":1,\"ctx-bins\":[\"" << ctxBin1 << "\",\"" << ctxBin2 << "\"]},"
-        << "\"positional-encoding\":{\"type\":\"rope\",\"rope-dim\":32,\"rope-theta\":1000000,"
-        << "\"rope-scaling\":{\"rope-type\":\"default\"}}}"
+        << "\"binary\":{\"version\":1,\"ctx-bins\":[\"" << ctxBin1 << "\",\""
+        << ctxBin2 << "\"]}}"
         << "}"
         << "}"
         << "}";
@@ -242,10 +311,24 @@ std::string statusMessage(const std::string& operation, Genie_Status_t status) {
 
 struct QueryState {
     std::string text;
+    int generatedTokenCount = 0;
 };
 
 void profileAllocCallback(const size_t size, const char** allocatedData) {
     *allocatedData = static_cast<const char*>(std::malloc(size));
+}
+
+const char* sentenceCodeName(GenieDialog_SentenceCode_t code) {
+    switch (code) {
+        case GENIE_DIALOG_SENTENCE_COMPLETE: return "COMPLETE";
+        case GENIE_DIALOG_SENTENCE_BEGIN: return "BEGIN";
+        case GENIE_DIALOG_SENTENCE_CONTINUE: return "CONTINUE";
+        case GENIE_DIALOG_SENTENCE_END: return "END";
+        case GENIE_DIALOG_SENTENCE_ABORT: return "ABORT";
+        case GENIE_DIALOG_SENTENCE_REWIND: return "REWIND";
+        case GENIE_DIALOG_SENTENCE_RESUME: return "RESUME";
+        default: return "UNKNOWN";
+    }
 }
 
 void queryCallback(const char* response,
@@ -253,6 +336,7 @@ void queryCallback(const char* response,
                    const void* userData) {
     auto* state = reinterpret_cast<QueryState*>(const_cast<void*>(userData));
     if (!state || !response) {
+        LOGI("queryCallback: code=%s, response=null", sentenceCodeName(sentenceCode));
         return;
     }
 
@@ -260,17 +344,49 @@ void queryCallback(const char* response,
         sentenceCode == GENIE_DIALOG_SENTENCE_CONTINUE ||
         sentenceCode == GENIE_DIALOG_SENTENCE_END ||
         sentenceCode == GENIE_DIALOG_SENTENCE_COMPLETE) {
+        LOGI("queryCallback: code=%s, responseLength=%zu, response=[%s]",
+             sentenceCodeName(sentenceCode), strlen(response), response);
         state->text += response;
+        state->generatedTokenCount++;
+    } else {
+        LOGI("queryCallback: non-append code=%s, response=[%s]",
+             sentenceCodeName(sentenceCode), response);
     }
 }
 
 class GenieSession {
 public:
-    explicit GenieSession(const std::string& modelRoot, int maxTokens, int threadCount) {
-        LOGI("GenieSession create start, modelRoot=%s, maxTokens=%d, threadCount=%d",
-             modelRoot.c_str(), maxTokens, threadCount);
+    explicit GenieSession(const std::string& modelRoot,
+                          int contextSize,
+                          int maxTokens,
+                          int maxOutputTokens,
+                          int threadCount,
+                          bool greedy,
+                          int topK,
+                          float topP,
+                          float temperature,
+                          float presencePenalty) : maxAllTokens_(maxTokens),
+                                                   maxOutputTokens_(maxOutputTokens) {
+        if (contextSize <= 0) {
+            throw std::invalid_argument("contextSize must be greater than zero");
+        }
+        if (maxTokens <= 0 || maxTokens > contextSize) {
+            throw std::invalid_argument(
+                "maxTokens must be in range [1, contextSize]");
+        }
+        if (maxOutputTokens <= 0 || maxOutputTokens > maxTokens) {
+            throw std::invalid_argument(
+                "maxOutputTokens must be in range [1, maxTokens]");
+        }
+        LOGI("GenieSession create start, modelRoot=%s, contextSize=%d, maxTokens=%d, "
+             "maxOutputTokens=%d, threadCount=%d, "
+             "greedy=%d, topK=%d, topP=%.3f, temperature=%.3f, presencePenalty=%.3f",
+             modelRoot.c_str(), contextSize, maxTokens, maxOutputTokens, threadCount,
+             greedy ? 1 : 0, topK, topP, temperature, presencePenalty);
         configureRuntimePaths(modelRoot);
-        std::string configJson = buildConfig(modelRoot, maxTokens, threadCount);
+        std::string configJson = buildConfig(modelRoot, contextSize, maxOutputTokens, threadCount,
+                                             greedy, topK, topP, temperature,
+                                             presencePenalty);
 
         Genie_Status_t status = GenieProfile_create(nullptr, &profile_);
         if (status != GENIE_STATUS_SUCCESS || !profile_) {
@@ -345,10 +461,26 @@ public:
         }
     }
 
+    void reset() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!dialog_) {
+            throw std::runtime_error("Native Genie dialog is not initialized.");
+        }
+        Genie_Status_t status = GenieDialog_reset(dialog_);
+        if (status != GENIE_STATUS_SUCCESS) {
+            throw std::runtime_error(statusMessage("GenieDialog_reset", status));
+        }
+        lastManualPromptTokenCount_ = -1;
+        lastManualGeneratedTokenCount_ = -1;
+        lastManualPromptTokenIds_ = "[]";
+        LOGI("GenieDialog_reset success");
+    }
+
     std::string warmup(const std::string& systemPrompt) {
         std::lock_guard<std::mutex> lock(mutex_);
         QueryState state;
-        LOGI("GenieDialog_query warmup start, promptLength=%zu", systemPrompt.size());
+        LOGI("GenieDialog_query warmup start, promptLength=%zu, prompt=[%s]",
+             systemPrompt.size(), systemPrompt.c_str());
         Genie_Status_t status = GenieDialog_query(
             dialog_,
             systemPrompt.c_str(),
@@ -359,20 +491,58 @@ public:
         if (status != GENIE_STATUS_SUCCESS && status != GENIE_STATUS_WARNING_CONTEXT_EXCEEDED) {
             throw std::runtime_error(statusMessage("GenieDialog_query warmup", status));
         }
-        LOGI("GenieDialog_query warmup finished, status=%d, resultLength=%zu",
-             status, state.text.size());
+        LOGI("GenieDialog_query warmup finished, status=%d, resultLength=%zu, result=[%s]",
+             status, state.text.size(), state.text.c_str());
         return state.text;
     }
 
-    std::string query(const std::string& prompt) {
+    std::string query(const std::string& prompt, bool rewind) {
         std::lock_guard<std::mutex> lock(mutex_);
         QueryState state;
+        lastManualPromptTokenCount_ = -1;
+        lastManualPromptTokenIds_ = "[]";
+        GenieTokenizer_Handle_t tokenizer = nullptr;
+        Genie_Status_t status = GenieDialog_getTokenizer(dialog_, &tokenizer);
+        if (status != GENIE_STATUS_SUCCESS || !tokenizer) {
+            throw std::runtime_error(statusMessage("GenieDialog_getTokenizer", status));
+        }
+        const int32_t* promptTokenIds = nullptr;
+        uint32_t promptTokenCount = 0;
+        status = GenieTokenizer_encode(tokenizer, prompt.c_str(), profileAllocCallback,
+                                       &promptTokenIds, &promptTokenCount);
+        if (status != GENIE_STATUS_SUCCESS) {
+            throw std::runtime_error(statusMessage("GenieTokenizer_encode", status));
+        }
+        logTokenIds("[query] prompt", promptTokenIds, promptTokenCount);
+        lastManualPromptTokenIds_ = formatTokenIds(promptTokenIds, promptTokenCount);
+        std::free(const_cast<int32_t*>(promptTokenIds));
+        lastManualPromptTokenCount_ = static_cast<int>(promptTokenCount);
+        if (promptTokenCount >= static_cast<uint32_t>(maxAllTokens_)) {
+            throw std::runtime_error(
+                "Input token count " + std::to_string(promptTokenCount) +
+                " reaches max_all_token " + std::to_string(maxAllTokens_) +
+                "; no output-token budget remains.");
+        }
+        const uint32_t remainingTokenBudget =
+            static_cast<uint32_t>(maxAllTokens_) - promptTokenCount;
+        const uint32_t outputTokenBudget =
+            remainingTokenBudget < static_cast<uint32_t>(maxOutputTokens_)
+                ? remainingTokenBudget
+                : static_cast<uint32_t>(maxOutputTokens_);
+        status = GenieDialog_setMaxNumTokens(dialog_, outputTokenBudget);
+        if (status != GENIE_STATUS_SUCCESS) {
+            throw std::runtime_error(statusMessage("GenieDialog_setMaxNumTokens", status));
+        }
         auto start = std::chrono::steady_clock::now();
-        LOGI("GenieDialog_query start, promptLength=%zu", prompt.size());
-        Genie_Status_t status = GenieDialog_query(
+        GenieDialog_SentenceCode_t sentenceCode = rewind
+            ? GENIE_DIALOG_SENTENCE_REWIND
+            : GENIE_DIALOG_SENTENCE_COMPLETE;
+        LOGI("GenieDialog_query start, inputCode=%s, promptLength=%zu, prompt=[%s]",
+             sentenceCodeName(sentenceCode), prompt.size(), prompt.c_str());
+        status = GenieDialog_query(
             dialog_,
             prompt.c_str(),
-            GENIE_DIALOG_SENTENCE_END,
+            sentenceCode,
             queryCallback,
             &state);
 
@@ -381,10 +551,17 @@ public:
         }
         auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start).count();
-        LOGI("GenieDialog_query finished, status=%d, elapsedMs=%lld, resultLength=%zu",
+        LOGI("GenieDialog_query finished, status=%d, promptTokens=%u, outputTokenBudget=%u, "
+             "maxAllTokens=%d, elapsedMs=%lld, resultLength=%zu, generatedTokens=%d, result=[%s]",
              status,
+             promptTokenCount,
+             outputTokenBudget,
+             maxAllTokens_,
              static_cast<long long>(elapsedMs),
-             state.text.size());
+             state.text.size(),
+             state.generatedTokenCount,
+             state.text.c_str());
+        lastManualGeneratedTokenCount_ = state.generatedTokenCount;
         return state.text;
     }
 
@@ -403,14 +580,124 @@ public:
         return result;
     }
 
+    int lastManualPromptTokenCount() const {
+        return lastManualPromptTokenCount_;
+    }
+
+    const std::string& lastManualPromptTokenIds() const {
+        return lastManualPromptTokenIds_;
+    }
+
+    std::string queryStreaming(const std::string& prompt, bool rewind,
+                               JNIEnv* env, jobject callback, jmethodID onTokenMethod) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        lastManualPromptTokenCount_ = -1;
+        lastManualPromptTokenIds_ = "[]";
+
+        // 手动 encode 计算 prompt token 数（用于交叉验证）
+        GenieTokenizer_Handle_t tokenizer = nullptr;
+        Genie_Status_t status = GenieDialog_getTokenizer(dialog_, &tokenizer);
+        if (status != GENIE_STATUS_SUCCESS || !tokenizer) {
+            throw std::runtime_error(statusMessage("GenieDialog_getTokenizer", status));
+        }
+        const int32_t* promptTokenIds = nullptr;
+        uint32_t promptTokenCount = 0;
+        status = GenieTokenizer_encode(tokenizer, prompt.c_str(), profileAllocCallback,
+                                       &promptTokenIds, &promptTokenCount);
+        if (status != GENIE_STATUS_SUCCESS) {
+            throw std::runtime_error(statusMessage("GenieTokenizer_encode", status));
+        }
+        logTokenIds("[queryStreaming] prompt", promptTokenIds, promptTokenCount);
+        lastManualPromptTokenIds_ = formatTokenIds(promptTokenIds, promptTokenCount);
+        std::free(const_cast<int32_t*>(promptTokenIds));
+        lastManualPromptTokenCount_ = static_cast<int>(promptTokenCount);
+
+        if (promptTokenCount >= static_cast<uint32_t>(maxAllTokens_)) {
+            throw std::runtime_error(
+                "Input token count " + std::to_string(promptTokenCount) +
+                " reaches max_all_token " + std::to_string(maxAllTokens_) +
+                "; no output-token budget remains.");
+        }
+        const uint32_t remainingTokenBudget =
+            static_cast<uint32_t>(maxAllTokens_) - promptTokenCount;
+        const uint32_t outputTokenBudget =
+            remainingTokenBudget < static_cast<uint32_t>(maxOutputTokens_)
+                ? remainingTokenBudget
+                : static_cast<uint32_t>(maxOutputTokens_);
+        status = GenieDialog_setMaxNumTokens(dialog_, outputTokenBudget);
+        if (status != GENIE_STATUS_SUCCESS) {
+            throw std::runtime_error(statusMessage("GenieDialog_setMaxNumTokens", status));
+        }
+
+        struct StreamContext {
+            JNIEnv* env;
+            jobject callback;
+            jmethodID onTokenMethod;
+            std::string text;
+            int generatedTokenCount = 0;
+        };
+        StreamContext ctx{env, callback, onTokenMethod, "", 0};
+
+        auto start = std::chrono::steady_clock::now();
+        GenieDialog_SentenceCode_t sentenceCode = rewind
+            ? GENIE_DIALOG_SENTENCE_REWIND
+            : GENIE_DIALOG_SENTENCE_COMPLETE;
+        LOGI("GenieDialog_queryStreaming start, inputCode=%s, promptLength=%zu",
+             sentenceCodeName(sentenceCode), prompt.size());
+
+        status = GenieDialog_query(
+            dialog_,
+            prompt.c_str(),
+            sentenceCode,
+            [](const char* response,
+               const GenieDialog_SentenceCode_t sentenceCode,
+               const void* userData) {
+                auto* ctx = reinterpret_cast<StreamContext*>(const_cast<void*>(userData));
+                if (!ctx || !ctx->env || !ctx->callback || !response) return;
+                if (sentenceCode == GENIE_DIALOG_SENTENCE_BEGIN ||
+                    sentenceCode == GENIE_DIALOG_SENTENCE_CONTINUE ||
+                    sentenceCode == GENIE_DIALOG_SENTENCE_END ||
+                    sentenceCode == GENIE_DIALOG_SENTENCE_COMPLETE) {
+                    ctx->text += response;
+                    ctx->generatedTokenCount++;
+                    jstring jToken = ctx->env->NewStringUTF(response);
+                    ctx->env->CallVoidMethod(ctx->callback, ctx->onTokenMethod, jToken);
+                    ctx->env->DeleteLocalRef(jToken);
+                }
+            },
+            &ctx);
+
+        if (status != GENIE_STATUS_SUCCESS && status != GENIE_STATUS_WARNING_CONTEXT_EXCEEDED) {
+            throw std::runtime_error(statusMessage("GenieDialog_queryStreaming", status));
+        }
+        auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start).count();
+        LOGI("GenieDialog_queryStreaming finished, status=%d, promptTokens=%u, outputTokenBudget=%u, "
+             "maxAllTokens=%d, elapsedMs=%lld, resultLength=%zu, generatedTokens=%d",
+             status,
+             promptTokenCount,
+             outputTokenBudget,
+             maxAllTokens_,
+             static_cast<long long>(elapsedMs),
+             ctx.text.size(),
+             ctx.generatedTokenCount);
+        lastManualGeneratedTokenCount_ = ctx.generatedTokenCount;
+        return ctx.text;
+        return ctx.text;
+    }
+
 private:
     GenieDialogConfig_Handle_t config_ = nullptr;
     GenieDialog_Handle_t dialog_ = nullptr;
     GenieProfile_Handle_t profile_ = nullptr;
     GenieLog_Handle_t log_ = nullptr;
+    int maxAllTokens_ = 256;
+    int maxOutputTokens_;
+    int lastManualPromptTokenCount_ = -1;
+    int lastManualGeneratedTokenCount_ = -1;
+    std::string lastManualPromptTokenIds_ = "[]";
     std::mutex mutex_;
 };
-
 jstring toJString(JNIEnv* env, const std::string& value) {
     return env->NewStringUTF(value.c_str());
 }
@@ -433,7 +720,7 @@ void throwJava(JNIEnv* env, const std::exception& e) {
 }  // namespace
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_qairt_qwen3geniedemo_GenieNative_version(JNIEnv* env, jclass) {
+Java_com_qairt_qwen3htp_GenieNative_version(JNIEnv* env, jclass) {
     std::ostringstream ss;
     ss << Genie_getApiMajorVersion() << "."
        << Genie_getApiMinorVersion() << "."
@@ -442,16 +729,30 @@ Java_com_qairt_qwen3geniedemo_GenieNative_version(JNIEnv* env, jclass) {
 }
 
 extern "C" JNIEXPORT jlong JNICALL
-Java_com_qairt_qwen3geniedemo_GenieNative_create(JNIEnv* env,
-                                                 jclass,
-                                                 jstring modelRoot,
-                                                 jint maxTokens,
-                                                 jint threadCount) {
+Java_com_qairt_qwen3htp_GenieNative_create(JNIEnv* env,
+                                                  jclass,
+                                                   jstring modelRoot,
+                                                   jint contextSize,
+                                                   jint maxTokens,
+                                                   jint maxOutputTokens,
+                                                  jint threadCount,
+                                                 jboolean greedy,
+                                                 jint topK,
+                                                 jfloat topP,
+                                                 jfloat temperature,
+                                                 jfloat presencePenalty) {
     try {
         auto session = std::make_unique<GenieSession>(
             toString(env, modelRoot),
+            static_cast<int>(contextSize),
             static_cast<int>(maxTokens),
-            static_cast<int>(threadCount));
+            static_cast<int>(maxOutputTokens),
+            static_cast<int>(threadCount),
+            greedy == JNI_TRUE,
+            static_cast<int>(topK),
+            static_cast<float>(topP),
+            static_cast<float>(temperature),
+            static_cast<float>(presencePenalty));
         return reinterpret_cast<jlong>(session.release());
     } catch (const std::exception& e) {
         throwJava(env, e);
@@ -460,7 +761,7 @@ Java_com_qairt_qwen3geniedemo_GenieNative_create(JNIEnv* env,
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_qairt_qwen3geniedemo_GenieNative_warmup(JNIEnv* env,
+Java_com_qairt_qwen3htp_GenieNative_warmup(JNIEnv* env,
                                                  jclass,
                                                  jlong handle,
                                                  jstring systemPrompt) {
@@ -477,16 +778,18 @@ Java_com_qairt_qwen3geniedemo_GenieNative_warmup(JNIEnv* env,
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_qairt_qwen3geniedemo_GenieNative_query(JNIEnv* env,
-                                                jclass,
-                                                jlong handle,
-                                                jstring prompt) {
+Java_com_qairt_qwen3htp_GenieNative_query(JNIEnv* env,
+                                                 jclass,
+                                                 jlong handle,
+                                                 jstring prompt,
+                                                 jboolean rewind) {
     try {
         auto* session = reinterpret_cast<GenieSession*>(handle);
         if (!session) {
             throw std::runtime_error("Native Genie session is not initialized.");
         }
-        return toJString(env, session->query(toString(env, prompt)));
+        return toJString(env, session->query(
+            toString(env, prompt), rewind == JNI_TRUE));
     } catch (const std::exception& e) {
         throwJava(env, e);
         return nullptr;
@@ -494,12 +797,12 @@ Java_com_qairt_qwen3geniedemo_GenieNative_query(JNIEnv* env,
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_qairt_qwen3geniedemo_GenieNative_runtimeEvidence(JNIEnv* env, jclass) {
+Java_com_qairt_qwen3htp_GenieNative_runtimeEvidence(JNIEnv* env, jclass) {
     return toJString(env, collectRuntimeEvidence());
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_qairt_qwen3geniedemo_GenieNative_profileJson(JNIEnv* env, jclass, jlong handle) {
+Java_com_qairt_qwen3htp_GenieNative_profileJson(JNIEnv* env, jclass, jlong handle) {
     try {
         auto* session = reinterpret_cast<GenieSession*>(handle);
         if (!session) {
@@ -512,8 +815,81 @@ Java_com_qairt_qwen3geniedemo_GenieNative_profileJson(JNIEnv* env, jclass, jlong
     }
 }
 
+extern "C" JNIEXPORT jint JNICALL
+Java_com_qairt_qwen3htp_GenieNative_getManualPromptTokenCount(JNIEnv*, jclass, jlong handle) {
+    auto* session = reinterpret_cast<GenieSession*>(handle);
+    return session ? session->lastManualPromptTokenCount() : -1;
+}
+
 extern "C" JNIEXPORT void JNICALL
-Java_com_qairt_qwen3geniedemo_GenieNative_release(JNIEnv*, jclass, jlong handle) {
+Java_com_qairt_qwen3htp_GenieNative_reset(JNIEnv* env, jclass, jlong handle) {
+    try {
+        auto* session = reinterpret_cast<GenieSession*>(handle);
+        if (!session) {
+            throw std::runtime_error("Native Genie session is not initialized.");
+        }
+        session->reset();
+    } catch (const std::exception& e) {
+        throwJava(env, e);
+    }
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_qairt_qwen3htp_GenieNative_getManualPromptTokenIds(JNIEnv* env,
+                                                            jclass,
+                                                            jlong handle) {
+    auto* session = reinterpret_cast<GenieSession*>(handle);
+    return toJString(env, session ? session->lastManualPromptTokenIds() : "[]");
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_qairt_qwen3htp_GenieNative_queryStreaming(JNIEnv* env,
+                                                   jclass,
+                                                   jlong handle,
+                                                   jstring prompt,
+                                                   jboolean rewind,
+                                                   jobject callback) {
+    try {
+        auto* session = reinterpret_cast<GenieSession*>(handle);
+        if (!session) {
+            throw std::runtime_error("Native Genie session is not initialized.");
+        }
+
+        jclass callbackClass = env->GetObjectClass(callback);
+        if (!callbackClass) {
+            throw std::runtime_error("Failed to get StreamCallback class");
+        }
+        jmethodID onTokenMethod = env->GetMethodID(callbackClass, "onToken", "(Ljava/lang/String;)V");
+        env->DeleteLocalRef(callbackClass);
+
+        if (!onTokenMethod) {
+            throw std::runtime_error("StreamCallback.onToken method not found");
+        }
+
+        jobject globalCallback = env->NewGlobalRef(callback);
+        if (!globalCallback) {
+            throw std::runtime_error("Failed to create global ref for StreamCallback");
+        }
+
+        std::string result;
+        try {
+            result = session->queryStreaming(
+                toString(env, prompt), rewind == JNI_TRUE, env, globalCallback, onTokenMethod);
+        } catch (...) {
+            env->DeleteGlobalRef(globalCallback);
+            throw;
+        }
+        env->DeleteGlobalRef(globalCallback);
+        return toJString(env, result);
+    } catch (const std::exception& e) {
+        throwJava(env, e);
+        return nullptr;
+    }
+}
+
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_qairt_qwen3htp_GenieNative_release(JNIEnv*, jclass, jlong handle) {
     auto* session = reinterpret_cast<GenieSession*>(handle);
     delete session;
 }

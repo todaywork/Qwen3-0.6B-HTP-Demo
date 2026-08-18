@@ -17,3 +17,18 @@ app/.cxx/
 *.swp
 Thumbs.db
 .DS_Store
+
+# Local IDE and agent tooling
+.vscode/
+.qoder/
+.tools/
+.codex-*/
+.codex_tmp_*/
+.gradle-codex/
+
+# Generated diagnostics and batch outputs
+outputs/
+run_logs/
+**/__pycache__/
+*.pyc
+scripts/**/batch_results/

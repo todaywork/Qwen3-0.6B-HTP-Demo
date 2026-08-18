@@ -91,7 +91,6 @@ typedef enum {
  */
 typedef enum {
   GENIE_DIALOG_PARAM_CONTEXT_OCCUPANCY = 0,
-  GENIE_DIALOG_PARAM_APPLIED_LORA_ADAPTER = 1,
   // Future parameters can be added here
 } GenieDialog_Param_t;
 
@@ -508,29 +507,6 @@ Genie_Status_t GenieDialog_setLoraStrength(const GenieDialog_Handle_t dialogHand
                                            const float alpha);
 
 /**
- * @brief A function to release memory occupied by a LoRA adapter.
- *
- * @details This API explicitly releases the memory resources occupied by a previously
- *          applied LoRA adapter. After release, re-applying the same adapter will require
- *          reloading from disk, which will be slower.
- *
- * @param[in] dialogHandle A dialog handle. Must not be NULL.
- *
- * @param[in] engine Engine name to be release. Must not be NULL.
- *
- * @param[in] loraAdapterName Name of the LoRA adapter to release. Must not be NULL.
- *
- * @return Status code:
- *         - GENIE_STATUS_SUCCESS: API call was successful.
- *         - GENIE_STATUS_ERROR_INVALID_HANDLE: Dialog handle is invalid.
- *         - GENIE_STATUS_ERROR_INVALID_ARGUMENT: At least one argument is invalid.
- *         - GENIE_STATUS_ERROR_GENERAL: Failed to release memory.
- */
-GENIE_API
-Genie_Status_t GenieDialog_releaseLoraMemory(const GenieDialog_Handle_t dialogHandle,
-                                             const char* engine,
-                                             const char* loraAdapterName);
-/**
  * @brief A function to get the sampler handle associated with a dialog.
  *
  * @param[in] dialogHandle A dialog handle.
@@ -742,7 +718,6 @@ Genie_Status_t GenieDialog_setMaxNumTokens(const GenieDialog_Handle_t dialogHand
  *
  * @note  Mapping of GenieDialog_Param_t keys to Genie_Value_t data types:
  *        GENIE_DIALOG_PARAM_CONTEXT_OCCUPANCY -> GENIE_DATATYPE_UINT_32
- *        GENIE_DIALOG_PARAM_APPLIED_LORA_ADAPTER -> GENIE_DATATYPE_STRING
  *
  * @param[in] dialogHandle The dialog handle.
  *
