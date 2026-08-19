@@ -40,15 +40,24 @@ void* openPackagedLibrary(const std::string& nativeDir, const char* soname) {
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_qairt_npudiagnostics_NpuDiagnosticsNative_probeQnn(
-        JNIEnv* env, jclass, jstring nativeDirValue, jstring dspDirValue) {
+        JNIEnv* env, jclass, jstring nativeDirValue, jstring dspDirValue,
+        jint htpArch) {
     const std::string nativeDir = fromJString(env, nativeDirValue);
     const std::string dspDir = fromJString(env, dspDirValue);
     setenv("ADSP_LIBRARY_PATH", (dspDir + ";" + nativeDir + ";/vendor/lib/rfsa/adsp;/vendor/dsp;/dsp").c_str(), 1);
-    std::ostringstream out; out << "{";
+    std::ostringstream out; out << "{\"htpArch\":" << htpArch << ',';
     void* system = openPackagedLibrary(nativeDir, "libQnnSystem.so");
     statusJson(out, "systemLibraryLoad", system != nullptr, system ? 0 : -1);
-    void* stub = openPackagedLibrary(nativeDir, "libQnnHtpV73Stub.so");
+    const char* stubName = nullptr;
+    if (htpArch == 68) stubName = "libQnnHtpV68Stub.so";
+    else if (htpArch == 73) stubName = "libQnnHtpV73Stub.so";
+    if (!stubName) {
+        out << "\"result\":\"UNSUPPORTED_HTP_ARCH\"}";
+        return env->NewStringUTF(out.str().c_str());
+    }
+    void* stub = openPackagedLibrary(nativeDir, stubName);
     statusJson(out, "htpStubLoad", stub != nullptr, stub ? 0 : -1);
+    out << "\"htpStubName\":\"" << stubName << "\",";
     void* backend = openPackagedLibrary(nativeDir, "libQnnHtp.so");
     statusJson(out, "htpBackendLoad", backend != nullptr, backend ? 0 : -1);
     if (!backend) {

@@ -47,13 +47,20 @@ public final class NpuDiagnosticsActivity extends Activity {
             getSystemService(ActivityManager.class).getMemoryInfo(mi);
             String qnn;
             try {
+                String dspLibraryDir = getIntent().getStringExtra("dsp_library_dir");
+                int htpArch = getIntent().getIntExtra("htp_arch", -1);
+                if (dspLibraryDir == null || dspLibraryDir.isEmpty()) {
+                    throw new IllegalStateException("Missing dsp_library_dir");
+                }
                 qnn = NpuDiagnosticsNative.probeQnn(getApplicationInfo().nativeLibraryDir,
-                        "/data/local/tmp/genie_qwen3_quality/dsp");
+                        dspLibraryDir, htpArch);
             } catch (Throwable t) {
                 qnn = "{\"result\":\"ERROR\",\"message\":\"" + t + "\"}";
             }
             String s = "综合结论\n诊断进程隔离：PASS\n监控进程隔离：PASS\n\n设备\n"
-                    + "SoC：" + systemProperty("ro.soc.model") + "\nABI：" + Build.SUPPORTED_ABIS[0]
+                    + "SoC：" + systemProperty("ro.soc.model")
+                    + "\nHTP：V" + getIntent().getIntExtra("htp_arch", -1)
+                    + "\nABI：" + Build.SUPPORTED_ABIS[0]
                     + "\nAndroid：" + Build.VERSION.RELEASE
                     + String.format(Locale.US, "\n系统内存：%.2f GiB\n当前可用：%.2f GiB\n", mi.totalMem / 1073741824.0, mi.availMem / 1073741824.0)
                     + "NPU 内存架构：共享 DDR（当前平台结论）\n\nQNN/HTP 现场探测 JSON\n" + qnn + "\n\n"

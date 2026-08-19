@@ -1,10 +1,12 @@
-# Qwen3-0.6B HTP Demo（SA8775 ADP）
+# Qwen3-0.6B HTP Demo（SA8295P / SA8255P / SA8775P）
 
 基于 Qualcomm Genie / QNN HTP（QAIRT）的 Qwen3-0.6B 端侧推理 Demo 应用，
-在 SA8775 ADP 开发板的 NPU（HTP v73）上运行 W4A16 量化模型。
+在 SA8295P（HTP v68）或 SA8255P/SA8775P（HTP v73）的 NPU 上运行 W4A16 量化模型。
 
 - 应用包名：`com.qairt.qwen3htp`
 - 支持单次对话推理和 Excel 语料批量推理
+- 单 APK 根据 `Build.SOC_MODEL` 自动选择 HTP v68/v73，并从 APK assets
+  解压对应 DSP 运行库；无需按 SoC 构建不同渠道包
 
 ## 一、安装应用
 
@@ -33,44 +35,37 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ├── tokenizer.json                # Qwen3 分词器
 ├── htp_backend_ext_config.json   # HTP 后端扩展配置（推送根目录下的 htp_backend_ext_config.device.json 并重命名）
 ├── part1_of_2.bin                # Genie context binary 第 1 段（约 297 MiB）
-├── part2_of_2.bin                # Genie context binary 第 2 段（约 380 MiB）
-├── dsp/
-│   └── libQnnHtpV73Skel.so       # HTP v73 Skel 库（DSP 侧，必须放在 dsp/ 子目录）
-└── lib/                          # QNN/Genie 运行时库（可选，也可放模型根目录）
-    ├── libGenie.so
-    ├── libQnnHtp.so
-    ├── libQnnHtpNetRunExtensions.so
-    ├── libQnnHtpV73Stub.so
-    └── libQnnSystem.so
+└── part2_of_2.bin                # Genie context binary 第 2 段（约 380 MiB）
 ```
 
-JNI 层启动时会校验以下 5 个文件是否存在，缺一即报错：
+JNI 层启动时会校验以下模型文件和自动解压的 Skel 是否存在，缺一即报错：
 
 - `tokenizer.json`
 - `htp_backend_ext_config.json`
 - `part1_of_2.bin`
 - `part2_of_2.bin`
-- `dsp/libQnnHtpV73Skel.so`
+- SA8295P：应用私有目录中的 `libQnnHtpV68Skel.so`
+- SA8255P / SA8775P：应用私有目录中的 `libQnnHtpV73Skel.so`
+
+`htp_backend_ext_config.json` 和 context binary 必须与目标 SoC/HTP 架构匹配。
+不支持的 `SOC_MODEL` 会禁用推理并通过 Toast 和日志明确提示，不会默认回退到某个架构。
 
 ### 推送命令示例
 
 ```bash
 MODEL_ROOT=/data/local/tmp/genie_qwen3_quality
 
-adb shell mkdir -p $MODEL_ROOT/dsp $MODEL_ROOT/lib
+adb shell mkdir -p $MODEL_ROOT
 
 # 模型文件（AI Hub 编译产物）
 adb push tokenizer.json                $MODEL_ROOT/
 adb push part1_of_2.bin                $MODEL_ROOT/
 adb push part2_of_2.bin                $MODEL_ROOT/
 adb push htp_backend_ext_config.device.json $MODEL_ROOT/htp_backend_ext_config.json
-
-# DSP Skel 库
-adb push libQnnHtpV73Skel.so           $MODEL_ROOT/dsp/
-
-# 运行时库（项目 lib/ 目录已包含）
-adb push lib/                          $MODEL_ROOT/lib/
 ```
+
+DSP 运行库已经按 `assets/qnn/v68/dsp` 和 `assets/qnn/v73/dsp` 打入 APK，首次使用时
+自动解压。调试时可通过 Intent extra `htp_arch=68` 或 `htp_arch=73` 覆盖自动识别结果。
 
 也可以使用项目自带的推送脚本（PowerShell，包含完整性校验）：
 
