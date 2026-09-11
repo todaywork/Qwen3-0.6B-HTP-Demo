@@ -1,6 +1,6 @@
 # AutoDL + AI Hub 编译 Qwen3-0.6B GenieX-QAIRT 模型（SA8775 ADP）
 
-本文按当前 AutoDL 实例的实际路径，说明如何使用完整 Hugging Face 模型 `/root/autodl-tmp/work/source_checkpoint` 完成 W4A16 量化，再通过 Qualcomm AI Hub 编译为面向 SA8775 ADP 的 GenieX-QAIRT 产物。该路径当前是软链接，实际指向 `/root/autodl-tmp/work/qwen3-06b-car-merged-v5`。
+本文按当前 AutoDL 实例的实际路径，说明如何使用完整 Hugging Face 模型 /root/autodl-tmp/work/source_checkpoint 完成 W4A16 量化，再通过 Qualcomm AI Hub 编译为面向 SA8775 ADP 的 GenieX-QAIRT 产物。该路径当前是软链接，实际指向 `/root/autodl-tmp/work/qwen3-06b-car-merged-v5`。
 
 > 本文中的 Linux 命令均在 AutoDL 网页终端或已经登录的 AutoDL Shell 中直接执行，不需要在命令外层再套 `ssh`，也不使用 `nohup`。命令以前台方式运行，并用 `tee` 实时显示和保存日志。
 
@@ -9,9 +9,9 @@
 ## 1. 环境要求
 
 - AutoDL：Ubuntu 22.04、Python 3.10、CUDA 12.x，建议 RTX 3090 24GB 或更高。
-- 官方 AdaScale 配方耗时和临时数据量较大，建议内存 64GB 以上、AutoDL 数据盘预留 200GB 以上。
+- 官方 AdaScale 配方耗时和临时数据量较大，建议内存 120GB 、AutoDL 数据盘预留 200GB 以上。
 - Qualcomm AI Hub 账号及 API Token。
-- 本地 Qualcomm AI Hub Models Python 源码库：`E:\QualComm\ai-hub-models-0.60.0`。
+- 本地 Qualcomm AI Hub Models Python 源码库：`E:\QualComm\ai-hub-models-0.60.0`。从github官网下载
 - 本地模型目录至少包含 `config.json`、`*.safetensors`、Tokenizer 文件；分片权重还应包含 `model.safetensors.index.json`。
 
 所有中间文件必须放在 AutoDL 数据盘 `/root/autodl-tmp`，不要放在系统盘或默认 `/tmp`。
@@ -23,16 +23,16 @@
 ```text
 源模型入口=/root/autodl-tmp/work/source_checkpoint
 源模型实际目录=/root/autodl-tmp/work/qwen3-06b-car-merged-v5
-量化 checkpoint=/root/autodl-tmp/qwen3_car_w4a16_cl4096
-ai-hub-models 源码=/root/autodl-tmp/ai-hub-models-0.60.0
+量化保存目录 checkpoint=/root/autodl-tmp/qwen3_car_w4a16_cl4096
+ai-hub-models 源码=/root/autodl-tmp/ai-hub-models-0.60.0 从github官网下载
 Python 环境=/root/autodl-tmp/conda-envs/qaihm060
 ```
 
 只有需要替换为 Windows 上的新模型时，才在 PowerShell 中执行：
 
 ```powershell
-$AutoDLHost = "root@connect.nmb1.seetacloud.com"
-$AutoDLPort = 39194
+$AutoDLHost = "root@xxx.com"
+$AutoDLPort = 端口
 
 # 上传新模型；不要覆盖当前 source_checkpoint 指向的旧模型
 scp -P $AutoDLPort -r "E:\LLMProject\models\source_model" "${AutoDLHost}:/root/autodl-tmp/work/"
@@ -80,6 +80,8 @@ export SETUPTOOLS_SCM_PRETEND_VERSION="$QAIHM_VERSION"
 
 "$QAIHM_PY" -m pip install --upgrade pip
 
+#`qai-hub-models` 项目有两个子包：`cli/` 和 `src/`。主包（`src/`）依赖 CLI 包（`cli/`），
+# 而 CLI 包不在 PyPI 上，必须先本地安装。
 "$QAIHM_PY" -m pip install -e "$QAIHM_REPO/cli"
 "$QAIHM_PY" -m pip install -e "$QAIHM_REPO/src"
 
@@ -88,7 +90,7 @@ export SETUPTOOLS_SCM_PRETEND_VERSION="$QAIHM_VERSION"
   -i https://pypi.tuna.tsinghua.edu.cn/simple \
   --trusted-host pypi.tuna.tsinghua.edu.cn
   
-  安装后检查环境：
+  # 安装后检查环境：
 "$QAIHM_PY" -m pip show qai_hub_models | grep -E 'Name|Version|Editable'
 "$QAIHM_PY" -m pip show qai_hub_models_cli | grep -E 'Name|Version|Editable'
 ```
@@ -147,11 +149,8 @@ find "$SOURCE_CHECKPOINT" -maxdepth 1 -type f \( -name '*.safetensors' -o -name 
 
 ```bash
 cd /root/autodl-tmp/ai-hub-models-0.60.0
-
-if test -s /root/autodl-tmp/qwen3_car_w4a16_cl4096-1/model.encodings; then
-  echo "量化 checkpoint 已存在，跳过重复量化：/root/autodl-tmp/qwen3_car_w4a16_cl4096"
-else
-  set -o pipefail
+#  --use-spin-quant r2,r3 这个参数R2,R3版本效果远好于R1,R2.
+set -o pipefail
   env \
     TMPDIR=/root/autodl-tmp/tmp \
     TMP=/root/autodl-tmp/tmp \
@@ -173,47 +172,37 @@ else
     --num-samples 24 \
     --context-length 4096 \
     --calibration-sequence-length 2048 \
-    --output-dir /root/autodl-tmp/qwen3_car_w4a16_cl4096_v21 \
-    2>&1 | tee /root/autodl-tmp/logs/quantize_w4a16_cl4096.log
-fi
+    --output-dir /root/autodl-tmp/qwen3_car_w4a16_cl4096_v22 \
+    2>&1 | tee /root/autodl-tmp/logs/quantize_w4a16_cl4096_v22.log
 
 # 实时查看日志
-tail -f /root/autodl-tmp/logs/quantize_w4a16_cl4096_v21.log
+tail -f /root/autodl-tmp/logs/quantize_w4a16_cl4096_v22.log
 ```
 
-以上参数基于 Qualcomm 官方 Qwen3-0.6B W4A16 checkpoint 的 `args.json`，仅将 AdaScale 样本数从 128 调整为 32：
-
-实测验证32的样本集和64个样本集，量化后的PPL几乎没有变。说明32个样本集已经足够当前量化了。
+以上参数基于 Qualcomm 官方 Qwen3-0.6B W4A16 checkpoint 的 `args.json`，仅将 AdaScale 样本数从 128 调整为 48
 
 
 
-| 参数 | 值 | 作用 |
-|---|---:|---|
-| `precision` | `w4a16` | 权重 4 bit、激活 16 bit |
-| `use_ada_scale` | `true` | 启用 AdaScale 权重量化优化 |
-| `ada_scale_num_samples` | `32` | AdaScale 校准样本数（为缩短量化时间，由官方 checkpoint 的 128 调整为 32） |
-| `ada_scale_num_iterations` | `2048` | 每阶段优化迭代数 |
-| `num_samples` | `20` | 基础量化校准样本数 |
-| `context_length` | `4096` | 模型量化上下文长度 |
-| `calibration_sequence_length` | `2048` | 校准序列长度 |
-| `use_dynamic_shapes` | `false` | 官方 checkpoint 未启用动态 shape |
-| `use_seq_mse` | `false` | 官方 checkpoint 未启用 SeqMSE |
-
-`use_dynamic_shapes=false` 和 `use_seq_mse=false` 是未启用对应开关后的默认状态，因此命令中不额外传参。官方记录中的 `/tmp/claude/qwen3_0_6b_w4a16_ckpt` 只是其运行环境输出目录；当前 AutoDL 实际输出目录为 `/root/autodl-tmp/qwen3_car_w4a16_cl4096`。
-
-AdaScale 32 样本、2048 次迭代仍会明显延长量化时间。上述命令在当前 AutoDL 终端前台运行，并通过 `tee` 同时显示和保存日志；任务结束前不要关闭该终端或停止实例。
-
-### 量化完成后检查：
+### 6.1 量化完成后检查：(非必要检查)
 
 这个脚本已经原生支持 `v19`，无需修改脚本。建议按“静态检查 → 本地结构检查 → Layer 2 云端验证 → 完整 28 层验证”的顺序执行，不建议直接 `--stage all`，因为最多会提交 29 个 compile 和 29 个 inference job。
 
 以下命令应在保存 checkpoint 的 AutoDL Linux 主机执行。假设 v19 checkpoint 路径为 `/root/autodl-tmp/qwen3_car_w4a16_cl4096_v19`；如果实际目录不同，只改 `CHECKPOINT`。
 
 ```
-export QAIHM_PY=/root/autodl-tmp/conda-envs/qaihm060/bin/python
-export VALIDATOR=/root/autodl-tmp/tools/validate_qwen3_v17_v18.py
-export CHECKPOINT=/root/autodl-tmp/qwen3_car_w4a16_cl4096_v21
-export LOG_ROOT=/root/autodl-tmp/logs/sim_vs_device_qwen3_0_6b_v21
+# 正常执行
+/root/autodl-tmp/conda-envs/qaihm060/bin/python \
+  /root/autodl-tmp/tools/validate_qwen3_v17_v18.py \
+  --checkpoint /root/autodl-tmp/qwen3_car_w4a16_cl4096_v21 \
+  --version v21
+  
+# 自动跑完全部流程：
+/root/autodl-tmp/conda-envs/qaihm060/bin/python \
+  /root/autodl-tmp/tools/validate_qwen3_v17_v18.py \
+  --checkpoint /root/autodl-tmp/qwen3_car_w4a16_cl4096_v21 \
+  --version v21 \
+  --stage all \
+  --confirm-cloud
 ```
 
 先确认 checkpoint 三件套存在：
@@ -332,7 +321,7 @@ PHASE B LAYER2 GATE: PASS
 ```
 "$QAIHM_PY" "$VALIDATOR" \
   --checkpoint "$CHECKPOINT" \
-  --version v19 \
+  --version v21 \
   --stage full \
   --report "$LOG_ROOT/02_one_click_v19_layer2_phase_b_tap_per_layer.json" \
   --device "SA8775P ADP" \
@@ -381,23 +370,16 @@ JSON 中必须满足：
 
 
 
-### Smoke Test：
+### 6.2 Smoke Test：验证量化后准确率（必要检查）
 
 ```bash
+# 单条跑，用默认systemPrompt
 /root/autodl-tmp/conda-envs/qaihm060/bin/python -m qai_hub_models.models.qwen3_0_6b.demo \
   --checkpoint /root/autodl-tmp/qwen3_car_w4a16_cl4096 \
   --max-output-tokens 64 \
   --prompt "请用一句话说明什么是量化。"
   
-cd  /root/autodl-tmp/
-python smoke20/run_smoke20.py /root/autodl-tmp/qwen3_car_w4a16_cl4096_v21 v21
-```
-
-若 `demo --help` 显示还需要 context/sequence 参数，按当前版本帮助补充。
-
-车载意图抽取场景可使用下面的 raw smoke test。`--raw` 允许自定义 system prompt，但会让 AI Hub Models 直接原样使用 prompt，绕过聊天模板及 `--no-thinking` 的自动处理。因此必须手工写入 `<|im_start|>`、`<|im_end|>` 以及空的 `<think>\n\n</think>` 块。命令中的 `--no-thinking` 在 raw 模式下是冗余参数；保留它不改变输入，真正关闭 thinking 的是手工写入的空 thinking 块：
-
-```bash
+# 指定提示词推理
 /root/autodl-tmp/conda-envs/qaihm060/bin/python -m qai_hub_models.models.qwen3_0_6b.demo \
   --checkpoint /root/autodl-tmp/qwen3_car_w4a16_cl4096_v17 \
   --max-output-tokens 64 \
@@ -407,11 +389,19 @@ python smoke20/run_smoke20.py /root/autodl-tmp/qwen3_car_w4a16_cl4096_v21 v21
   --seed 42 \
   --raw \
   --prompt $'<|im_start|>system\nYou are a multilingual vehicle control assistant. Extract intent and slots from user commands in any language. Always respond with English JSON only. Do not think or explain.Only fill slot keys explicitly mentioned in the user command, otherwise use "slot":{}<|im_end|>\n<|im_start|>user\nУвеличь вентиляцию правого сиденья второго ряда на один уровень\n<|im_end|>\n<|im_start|>assistant\n'
+  
+# 批跑验证
+cd  /root/autodl-tmp/
+python smoke20/run_smoke20.py /root/autodl-tmp/qwen3_car_w4a16_cl4096_v21 v21
 ```
 
+若 `demo --help` 显示还需要 context/sequence 参数，按当前版本帮助补充。
+
+车载意图抽取场景可使用下面的 raw smoke test。`--raw` 允许自定义 system prompt，但会让 AI Hub Models 直接原样使用 prompt，绕过聊天模板及 `--no-thinking` 的自动处理。因此必须手工写入 `<|im_start|>`、`<|im_end|>` 以及空的 `<think>\n\n</think>` 块。命令中的 `--no-thinking` 在 raw 模式下是冗余参数；保留它不改变输入，真正关闭 thinking 的是手工写入的空 thinking 块
 
 
-### 困惑度（PPL）评估
+
+### 6.3 困惑度（PPL）测试（非必要检查）
 
 - **困惑度（PPL）**：语言模型的核心指标，越低越好
 - 量化前（原始 bfloat16）vs 量化后（W4A16）的 PPL 对比
@@ -427,7 +417,7 @@ cp /root/autodl-tmp/work/source_checkpoint/config.json \
 /root/autodl-tmp/conda-envs/qaihm060/bin/python -m qai_hub_models.models.qwen3_0_6b.evaluate --checkpoint /root/autodl-tmp/qwen3_car_w4a16_cl4096_v19 --task wikitext
 ```
 
-
+**困惑度结果指标：**
 
 | 指标            | 含义                 | 判断标准               |
 | --------------- | -------------------- | ---------------------- |
@@ -466,7 +456,6 @@ cp /root/autodl-tmp/work/source_checkpoint/config.json \
 ```bash
 mkdir -p /root/autodl-tmp/output/export_sa8775p_multictx /root/autodl-tmp/logs
 cd /root/autodl-tmp/ai-hub-models-0.60.0
-# 太容易和ai hub断开超时了。
 set -o pipefail
 env \
   TMPDIR=/root/autodl-tmp/tmp \
@@ -484,9 +473,9 @@ env \
   --sequence-lengths 128,1 \
   --context-lengths 512 \
   --skip-profiling \
-  --output-dir /root/autodl-tmp/output/export_sa8775p_multictx512_v21 \
+  --output-dir /root/autodl-tmp/output/export_sa8775p_ctx512_v21 \
   --zip-assets \
-  2>&1 | tee /root/autodl-tmp/logs/export_sa8775p_multictx512_v21.log
+  2>&1 | tee /root/autodl-tmp/logs/export_sa8775p_ctx512_v21.log
 ```
 
 说明：
@@ -514,8 +503,8 @@ tar -czf qwen3_0.6b_sa8775_geniex_qairt_multictx.tar.gz output/export_sa8775p_mu
 在 Windows PowerShell 中执行：
 
 ```powershell
-$AutoDLHost = "root@connect.nmb1.seetacloud.com"
-$AutoDLPort = 34544
+$AutoDLHost = "root@xxx.com"
+$AutoDLPort = 实际autodl端口
 
 scp -P $AutoDLPort "${AutoDLHost}:/root/autodl-tmp/qwen3_0.6b_sa8775_geniex_qairt_multictx.tar.gz" `
   "E:\QualComm\ai-hub-compiles\"
@@ -527,67 +516,77 @@ tar -xf "E:\QualComm\ai-hub-compiles\qwen3_0.6b_sa8775_geniex_qairt_multictx.tar
 
 
 
-本地集成验证：
+## 10. 问题汇总：
 
-问题1：
+### 问题1：量化后准确率很低
 
-**真实量化 vs 模拟量化的系统性偏差（嫌疑最大）**——QuantSim 里 a16 是"假量化"（接近 fp16 无损），而 HTP 上激活是 **uint16 整型量化**、KV cache 是 **uint8**（metadata 里每层都带 scale/zero_point）。关键在于：**你的激活量化范围是用 wikitext 校准的**，车控指令对 wikitext 是域外分布，一旦真实硬件按这个范围做整型 clip，小模型（0.6B）在精确 extraction 任务上就会从"微调后行为"退化到"乱猜字段"。模拟器用的也是这套 scale，但 16-bit 假量化几乎无损，所以暴露不出来。
-
-必须是**与线上一模一样的 ChatML 原文**，每条 = 完整一轮对话（system + user + assistant 的 JSON 回答），多条顺序拼接成一个大文本：
+原因1：完全照搬官方发布的量化模型过程中使用的参数
 
 ```
-<|im_start|>system
-You are a multilingual vehicle control assistant. Extract intent and slots from user commands in Vietnamese or Malay. Always respond with English JSON only. Do not think or explain.<|im_end|>
-<|im_start|>user
-close the sunroof<|im_end|>
-<|im_start|>assistant
-<think>
-
-</think>
-
-{"intent":"CLOSE_SUNROOF","slot":{}}<|im_end|>
-<|im_start|>system
-You are a multilingual vehicle control assistant. ...<|im_end|>
-<|im_start|>user
-open the window<|im_end|>
-...
+① SpinQuant r2,r3  → 旋转权重矩阵（QuantSim 创建之前的浮点图前置变换），新增参数
+② Sequential MSE   → 逐层优化舍入：权重值"怎么四舍五入"，新增参数
+③ AdaScale         → 逐块学习截断 scale：权重分布"在哪里切"
+④ QuantSim 校准    → 统计激活 encodings
 ```
 
-要点：
+**1. 缺 SpinQuant r2,r3（影响最大）**
 
-- **assistant 回答用"人工校正版本"的 JSON**（语料表第 4 列），让量化器见到真实的输出 token 分布（大写枚举、嵌套 slot、花括号）——这是 wikitext 完全覆盖不到、也恰恰是板上输出跑偏的部分；
+- SpinQuant 在浮点图上插入正交旋转矩阵，把权重**异常大值（outlier）摊平**，直接降低后面 4-bit 量化的截断误差。W4 每个值只有 16 个档位，一个 outlier 就会把整组 scale 撑大，让其余权重全部粗粒度化。
+- 附录 A.2 里明确写了推荐值是**分模型的**：`qwen3-0.6b 推荐 r2,r3`（1.7B 才推荐 r1,r3）。第一条命令用的正是 0.6B 的推荐组合；第二条完全没开。对B 这种小模型，参数冗余度低、outlier 影响占比更大，开不开 SpinQuant 的差距会比 1.7B 更明显。
+- 执行顺序上它在 QuantSim 创建**之前**改变权重分布，后面 SeqMSE、AdaScale、校准全是在"旋转后更好量化"的分布上做的——是地基性的收益。
 
-- user 指令用"人工校正版本"的指令表述，越/马/英都放；
+**2. 缺 Sequential MSE（12 samples / 24 batches）**
 
-- 量级：原方案 120 样本 × 2048 token ≈ 25 万 token。语料表只有 15 条，需要用模板化变体（近义动词、位置枚举、程度词、三种语言排列）扩充到**几千条对话**，不足时重复拼接也比分布缺失强。
+- 不开 SeqMSE 时权重就是普通 round-to-nearest 四舍五入，只保证"每个权重离原值近"，不管"这一层输出对不对"。SeqMSE 逐层贪婪搜索最优舍入组合，选输出 MSE 最小的方案。
+- AdaScale 学的是 scale（"在哪里切"），SeqMSE 改的是 rounding（"怎么舍"），两者叠加互补——缺了任何一个，误差都会在 28 层（0.6B）逐层累积放大。文档里已有前车之：早期缺 AdaScale 的产物直接在 PC 和车机上输出乱码，你这次是缺 SeqMSE + SpinQuant，属于同一类问题，只是程度轻些（准确率下降而非乱码）。
 
-  #### 实施步骤（3 步）
+**原因2**：校准用的语料，采用官方发布的校准语料（GeneratedDataset）和wikiText语料1:1混插
+
+```java
+                        ┌─ WikiText (train) ──────────────┐
+ AdaScale 权重优化 ──────┤  纯 WikiText                     │
+ (2048 次梯度迭代)        └─────────────────────────────────┘
+
+                        ┌─ GeneratedDataset（本目录 txt）──┐
+ 最终校准（定标）────────┤  1:1 插混                         │
+ (InterleavedGenerated)  └─ WikiText (train) ───────────────┘
+```
+
+- **assistant 回答用"人工校正版本"的 JSON**，让量化器见到真实的输出 token 分布（大写枚举、嵌套 slot、花括号）——这是 GeneratedDataset完全覆盖不到、也恰恰是板上输出跑偏的部分；
+
+**解决办法：**
+
+1，量化过程,新增如下参数： 
 
 ```
-# ① 备份并替换生成语料（最终校准的域内一半立即生效）
+--use-spin-quant r2,r3 \
+--use-seq-mse \
+--seq-mse-num-samples 12 \
+```
+
+2，修改量化校准数据集
+
+```
+# ① 备份并替换掉官方语料校准集，改为我们微调模型时校准集（最终校准的域内一半立即生效）
 cp .../v1/generated_calibration.txt .../v1/generated_calibration.txt.bak
 cp car_corpus.txt .../v1/generated_calibration.txt
-
-# ② 改一行代码，让 AdaScale 也用域内语料：
-#    model.py 的 get_weight_optimization_data 里把 WikiText 换成 GeneratedDataset
-
-# ③ 重跑量化（参数同 v3，输出 v4），然后重新 export → 推板验证
+# ③ 重跑量化，然后重新 export → 推板验证
 ```
 
-## ① 两个数据源各用多少样本
+**① 校准和权重优化，两个数据源各用多少样本**
 
 以 v3 那次运行（`--num-samples 20`、`--ada-scale-num-samples 64`）的实际日志为准：
 
 | 校准环节               | 数据集构成                                                   | 样本量                             | 日志进度条                                            |
 | :--------------------- | :----------------------------------------------------------- | :--------------------------------- | :---------------------------------------------------- |
 | 最终校准（定激活范围） | `GeneratedDataset` + `WikiText` 各一半（代码：`per_source = num_samples // 2` 轮转交织） | **24 条**（12 生成 + 12 wikitext） | `Pre-filling (interleaved_generated_wikitext): 24/24` |
-| AdaScale 权重优化      | 纯 `WikiText`                                                | **96 条**                          | `Pre-filling (wikitext): 83/96` ← 崩在这              |
+| AdaScale 权重优化      | 纯 `WikiText`                                                | **24条**                           | `Pre-filling (wikitext): 83/96` ← 崩在这              |
 
 合计 120 条 × 每条约 900MB KV cache ≈ 110G 磁盘，就是之前算的那笔账。
 
 ⚠️ 注意你这次手动执行的脚本把 `--ada-scale-num-samples` 从 64 改成了 **48**，所以这轮 AdaScale 的样本量和磁盘需求会比 v3 小一些。
 
-## ② 为什么权重优化原本用纯 WikiText
+**② 为什么权重优化原本用纯 WikiText**
 
 这是**上游配方的设计选择，不是技术必需**。`dataset.py` 开头的注释写明了来历：
 
@@ -601,13 +600,85 @@ cp car_corpus.txt .../v1/generated_calibration.txt
 
 一句话：**纯 WikiText 是通用模型的出厂默认，不是对你的模型正确。** 改成域内语料后，权重优化（int4 舍入）和激活定标（uint16/uint8 范围）就都对准车控分布了。
 
+### 问题2：**模拟量化准确率提高了，但真实量化准确率很低**
+
+真实量化准确率才5%，模拟量化达到90以上%
+
+**原因1**：必须是**与线上一模一样的 ChatML 原文**，每条 = 完整一轮对话（system + user + assistant 的 JSON 回答），多条顺序拼接成一个大文本：
+
+```
+
+<|im_start|>system
+You are a multilingual vehicle control assistant. Extract intent and slots from user commands in Vietnamese or Malay. Always respond with English JSON only. Do not think or explain.<|im_end|>
+<|im_start|>user
+close the sunroof<|im_end|>
+<|im_start|>assistant
+----多了下面的think
+<think> 
+
+</think>
+
+{"intent":"CLOSE_SUNROOF","slot":{}}<|im_end|>
+<|im_start|>system
+You are a multilingual vehicle control assistant. ...<|im_end|>
+<|im_start|>user
+open the window<|im_end|>
+...
+```
+
+**原因2**：`down_proj.weight`这个值是INT4，不是INT8。这个值的SQNR（db）值开始出现偏差。
+
+| Layer 2 tap | SQNR (dB) |   cosine | max abs diff | 判断                                |
+| ----------- | --------: | -------: | -----------: | ----------------------------------- |
+| `o_proj`    |    56.447 | 0.999519 |      0.03494 | 正常                                |
+| `gate_up`   |    53.742 | 0.987374 |      0.79241 | 基本正常，是 `down_proj` 的输入边界 |
+| `down`      |    24.123 | 0.536302 |      2.63549 | 首个严重分歧点                      |
+| `residual`  |    32.606 | 0.867635 |      2.63551 | 继承 `down` 误差                    |
+
+字段含义：
+
+SQNR = 云端 QNN 输出相对于本地 QuantSim 输出的误差
+cosine = 云端 QNN 输出与 QuantSim 输出的方向相似度
 
 
-问题2：变体ctx256为啥比512还慢（16tok/s）。后续编译去掉256，换回512再试试。
+
+源码明确把以下权重声明为 INT8 质量例外：
+
+```python
+INT8_PARAM_NAMES = ("model.model.layers.2.mlp.down_proj.weight",)
+```
+
+源码注释说明，该权重保持 INT4 会使 100-prompt grader 的绝对分数下降约 13%。但当前 v17 `model.encodings` 中该权重实际为 W4，而不是 W8。其 initializer shape 为 `[1024, 3072, 1, 1]`，当前 W4 encoding 为 `PER_CHANNEL`、1024 个 scale、对称 offset `-8`；编码数量与 Conv 输出通道轴 0 一致，所以不是 encoding 缺失或 scale 数量错误。
+
+v17 Layer 2 同时存在极端 A16 激活范围：
+
+| 边界       |        scale | offset |        encoding 隐含范围 |
+| ---------- | -----------: | -----: | -----------------------: |
+| `gate_up`  | 0.1132012668 | -29764 | 约 `[-3369.32, 4049.32]` |
+| `down`     | 0.1254994601 |  -1492 |  约 `[-187.25, 8037.36]` |
+| `residual` | 0.1255005695 |  -1500 |  约 `[-188.25, 8036.43]` |
+
+同一 v17 内，Layer 1/3 的 `down` scale 分别为 `0.0001739506` 和 `0.0000950938`；Layer 2 分别放大约 721 倍和 1320 倍。工程结论是：v17 的首个主要错误点为 Layer 2 MLP `down_proj`，其 W8 质量例外在 checkpoint 中丢失，并伴随异常激活范围；QNN 在该 Conv 的定点累加/输出重定标处与 QuantSim 显著分歧。
+
+修复脚本中漏洞后验证：执行命令
+
+```
+/root/autodl-tmp/conda-envs/qaihm060/bin/python \
+  /root/autodl-tmp/tools/validate_qwen3_v17_v18.py \
+  --checkpoint /root/autodl-tmp/qwen3_car_w4a16_cl4096_v21 \
+  --version v21
+```
+
+| Layer 2 tap | SQNR (dB) |   cosine | max abs diff | 判断                                   |
+| ----------- | --------: | -------: | -----------: | -------------------------------------- |
+| `o_proj`    |    56.447 | 0.999519 |      0.03494 | 正常                                   |
+| `gate_up`   |    53.742 | 0.987374 |      0.79241 | 基本正常，max abs diff 略偏大          |
+| `down`      |    35.616 | 0.943081 |      0.37064 | 基本正常，SQNR (dB) 稍微偏小           |
+| `residual`  |    43.903 | 0.989657 |      0.49424 | 误差有所恢复，但仍继承 `down` 部分偏差 |
 
 
 
-## 10. 部署前检查清单
+## 11. 部署前检查清单
 
 - AI Hub 目标设备确认为 `SA8775P ADP` 或平台实际返回的 SA8775 ADP 名称。
 - 源模型是完整 Qwen3-0.6B checkpoint，不是未合并的 LoRA adapter。

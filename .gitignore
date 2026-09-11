@@ -32,3 +32,6 @@ run_logs/
 **/__pycache__/
 *.pyc
 scripts/**/batch_results/
+
+# PPT deck build tooling (node_modules, rendered temp)
+.ppt-build/
