@@ -17,17 +17,24 @@
 
 #include <sys/stat.h>
 #include <unistd.h>
+#include <dlfcn.h>
 
 #include "Genie/GenieCommon.h"
 #include "Genie/GenieDialog.h"
 #include "Genie/GenieLog.h"
 #include "Genie/GenieProfile.h"
+#include "Genie/GenieTokenizer.h"
 
 #define LOG_TAG "Qwen3GenieJni"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 namespace {
+
+// 编译期回退 HTP 架构：Java 侧 Build.SOC_MODEL 解析失败或传值非法时使用。
+// 68=SA8295P，73=SA8255P/SA8775P。
+constexpr int kHtpArch = HTP_ARCH;
 
 std::string readFile(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
@@ -234,15 +241,14 @@ void setEnv(const char* name, const std::string& value) {
     setenv(name, value.c_str(), 1);
 }
 
-void configureRuntimePaths(const std::string& modelRoot) {
-    const std::string dspPath = "/vendor/lib/rfsa/adsp;" + modelRoot + ";" +
-        modelRoot + "/dsp;" + modelRoot + "/lib";
+void configureRuntimePaths(const std::string& dspRoot) {
+    const std::string dspPath = dspRoot + ";/vendor/lib/rfsa/adsp";
     setEnv("ADSP_LIBRARY_PATH", dspPath);
     setEnv("CDSP_LIBRARY_PATH", dspPath);
     setEnv("CDSP1_LIBRARY_PATH", dspPath);
 }
 
-std::string buildConfig(const std::string& modelRoot,
+std::string buildConfig(const std::string& modelRoot, const std::string& dspRoot,
                         int contextSize,
                         int maxOutputTokens,
                         int threadCount,
@@ -250,12 +256,15 @@ std::string buildConfig(const std::string& modelRoot,
                         int topK,
                         float topP,
                         float temperature,
-                        float presencePenalty) {
+                        float presencePenalty,
+                        int htpArch) {
     const std::string tokenizer = modelRoot + "/tokenizer.json";
     const std::string htpConfig = modelRoot + "/htp_backend_ext_config.json";
     const std::string ctxBin1 = modelRoot + "/part1_of_2.bin";
     const std::string ctxBin2 = modelRoot + "/part2_of_2.bin";
-    const std::string htpSkel = modelRoot + "/dsp/libQnnHtpV73Skel.so";
+    char skelName[64];
+    std::snprintf(skelName, sizeof(skelName), "libQnnHtpV%dSkel.so", htpArch);
+    const std::string htpSkel = dspRoot + "/" + skelName;
 
     requireFile(tokenizer);
     requireFile(htpConfig);
@@ -318,6 +327,44 @@ void profileAllocCallback(const size_t size, const char** allocatedData) {
     *allocatedData = static_cast<const char*>(std::malloc(size));
 }
 
+// GenieDialog_getTokenizer / GenieTokenizer_encode / GenieDialog_setMaxNumTokens
+// 是较新 libGenie 才提供的 API（QNN 2.46 起齐全；2.34 时代的 libGenie 无导出）。
+// 为了让 qnn234 渠道也能链接运行，这里改为运行时 dlsym 探测：
+// 存在则走精确的客户端 token 预算；缺失则跳过预算控制，交给 dialog 配置兜底。
+struct OptionalGenieApi {
+    using GetTokenizerFn = Genie_Status_t (*)(const GenieDialog_Handle_t,
+                                              GenieTokenizer_Handle_t*);
+    using TokenizerEncodeFn = Genie_Status_t (*)(const GenieTokenizer_Handle_t,
+                                                 const char*,
+                                                 const Genie_AllocCallback_t,
+                                                 const int32_t**,
+                                                 uint32_t*);
+    using SetMaxNumTokensFn = Genie_Status_t (*)(const GenieDialog_Handle_t,
+                                                 const uint32_t);
+
+    GetTokenizerFn getTokenizer = nullptr;
+    TokenizerEncodeFn tokenizerEncode = nullptr;
+    SetMaxNumTokensFn setMaxNumTokens = nullptr;
+    bool resolved = false;
+
+    bool available() const {
+        return getTokenizer && tokenizerEncode && setMaxNumTokens;
+    }
+
+    void resolve() {
+        if (resolved) {
+            return;
+        }
+        resolved = true;
+        getTokenizer = reinterpret_cast<GetTokenizerFn>(
+            dlsym(RTLD_DEFAULT, "GenieDialog_getTokenizer"));
+        tokenizerEncode = reinterpret_cast<TokenizerEncodeFn>(
+            dlsym(RTLD_DEFAULT, "GenieTokenizer_encode"));
+        setMaxNumTokens = reinterpret_cast<SetMaxNumTokensFn>(
+            dlsym(RTLD_DEFAULT, "GenieDialog_setMaxNumTokens"));
+    }
+};
+
 const char* sentenceCodeName(GenieDialog_SentenceCode_t code) {
     switch (code) {
         case GENIE_DIALOG_SENTENCE_COMPLETE: return "COMPLETE";
@@ -356,7 +403,7 @@ void queryCallback(const char* response,
 
 class GenieSession {
 public:
-    explicit GenieSession(const std::string& modelRoot,
+    explicit GenieSession(const std::string& modelRoot, const std::string& dspRoot,
                           int contextSize,
                           int maxTokens,
                           int maxOutputTokens,
@@ -365,8 +412,9 @@ public:
                           int topK,
                           float topP,
                           float temperature,
-                          float presencePenalty) : maxAllTokens_(maxTokens),
-                                                   maxOutputTokens_(maxOutputTokens) {
+                          float presencePenalty,
+                          int htpArch) : maxAllTokens_(maxTokens),
+                                         maxOutputTokens_(maxOutputTokens) {
         if (contextSize <= 0) {
             throw std::invalid_argument("contextSize must be greater than zero");
         }
@@ -378,15 +426,18 @@ public:
             throw std::invalid_argument(
                 "maxOutputTokens must be in range [1, maxTokens]");
         }
-        LOGI("GenieSession create start, modelRoot=%s, contextSize=%d, maxTokens=%d, "
+        if (htpArch != kHtpArch) {
+            throw std::invalid_argument("HTP architecture does not match APK channel");
+        }
+        LOGI("GenieSession create start, modelRoot=%s, htpArch=%d, contextSize=%d, maxTokens=%d, "
              "maxOutputTokens=%d, threadCount=%d, "
              "greedy=%d, topK=%d, topP=%.3f, temperature=%.3f, presencePenalty=%.3f",
-             modelRoot.c_str(), contextSize, maxTokens, maxOutputTokens, threadCount,
+             modelRoot.c_str(), htpArch, contextSize, maxTokens, maxOutputTokens, threadCount,
              greedy ? 1 : 0, topK, topP, temperature, presencePenalty);
-        configureRuntimePaths(modelRoot);
-        std::string configJson = buildConfig(modelRoot, contextSize, maxOutputTokens, threadCount,
+        configureRuntimePaths(dspRoot);
+        std::string configJson = buildConfig(modelRoot, dspRoot, contextSize, maxOutputTokens, threadCount,
                                              greedy, topK, topP, temperature,
-                                             presencePenalty);
+                                             presencePenalty, htpArch);
 
         Genie_Status_t status = GenieProfile_create(nullptr, &profile_);
         if (status != GENIE_STATUS_SUCCESS || !profile_) {
@@ -501,45 +552,15 @@ public:
         QueryState state;
         lastManualPromptTokenCount_ = -1;
         lastManualPromptTokenIds_ = "[]";
-        GenieTokenizer_Handle_t tokenizer = nullptr;
-        Genie_Status_t status = GenieDialog_getTokenizer(dialog_, &tokenizer);
-        if (status != GENIE_STATUS_SUCCESS || !tokenizer) {
-            throw std::runtime_error(statusMessage("GenieDialog_getTokenizer", status));
-        }
-        const int32_t* promptTokenIds = nullptr;
-        uint32_t promptTokenCount = 0;
-        status = GenieTokenizer_encode(tokenizer, prompt.c_str(), profileAllocCallback,
-                                       &promptTokenIds, &promptTokenCount);
-        if (status != GENIE_STATUS_SUCCESS) {
-            throw std::runtime_error(statusMessage("GenieTokenizer_encode", status));
-        }
-        logTokenIds("[query] prompt", promptTokenIds, promptTokenCount);
-        lastManualPromptTokenIds_ = formatTokenIds(promptTokenIds, promptTokenCount);
-        std::free(const_cast<int32_t*>(promptTokenIds));
-        lastManualPromptTokenCount_ = static_cast<int>(promptTokenCount);
-        if (promptTokenCount >= static_cast<uint32_t>(maxAllTokens_)) {
-            throw std::runtime_error(
-                "Input token count " + std::to_string(promptTokenCount) +
-                " reaches max_all_token " + std::to_string(maxAllTokens_) +
-                "; no output-token budget remains.");
-        }
-        const uint32_t remainingTokenBudget =
-            static_cast<uint32_t>(maxAllTokens_) - promptTokenCount;
-        const uint32_t outputTokenBudget =
-            remainingTokenBudget < static_cast<uint32_t>(maxOutputTokens_)
-                ? remainingTokenBudget
-                : static_cast<uint32_t>(maxOutputTokens_);
-        status = GenieDialog_setMaxNumTokens(dialog_, outputTokenBudget);
-        if (status != GENIE_STATUS_SUCCESS) {
-            throw std::runtime_error(statusMessage("GenieDialog_setMaxNumTokens", status));
-        }
+        const TokenBudget budget = prepareTokenBudget(prompt, "[query]");
+
         auto start = std::chrono::steady_clock::now();
         GenieDialog_SentenceCode_t sentenceCode = rewind
             ? GENIE_DIALOG_SENTENCE_REWIND
             : GENIE_DIALOG_SENTENCE_COMPLETE;
         LOGI("GenieDialog_query start, inputCode=%s, promptLength=%zu, prompt=[%s]",
              sentenceCodeName(sentenceCode), prompt.size(), prompt.c_str());
-        status = GenieDialog_query(
+        Genie_Status_t status = GenieDialog_query(
             dialog_,
             prompt.c_str(),
             sentenceCode,
@@ -554,8 +575,8 @@ public:
         LOGI("GenieDialog_query finished, status=%d, promptTokens=%u, outputTokenBudget=%u, "
              "maxAllTokens=%d, elapsedMs=%lld, resultLength=%zu, generatedTokens=%d, result=[%s]",
              status,
-             promptTokenCount,
-             outputTokenBudget,
+             budget.promptTokenCount,
+             budget.outputTokenBudget,
              maxAllTokens_,
              static_cast<long long>(elapsedMs),
              state.text.size(),
@@ -594,40 +615,7 @@ public:
         lastManualPromptTokenCount_ = -1;
         lastManualPromptTokenIds_ = "[]";
 
-        // 手动 encode 计算 prompt token 数（用于交叉验证）
-        GenieTokenizer_Handle_t tokenizer = nullptr;
-        Genie_Status_t status = GenieDialog_getTokenizer(dialog_, &tokenizer);
-        if (status != GENIE_STATUS_SUCCESS || !tokenizer) {
-            throw std::runtime_error(statusMessage("GenieDialog_getTokenizer", status));
-        }
-        const int32_t* promptTokenIds = nullptr;
-        uint32_t promptTokenCount = 0;
-        status = GenieTokenizer_encode(tokenizer, prompt.c_str(), profileAllocCallback,
-                                       &promptTokenIds, &promptTokenCount);
-        if (status != GENIE_STATUS_SUCCESS) {
-            throw std::runtime_error(statusMessage("GenieTokenizer_encode", status));
-        }
-        logTokenIds("[queryStreaming] prompt", promptTokenIds, promptTokenCount);
-        lastManualPromptTokenIds_ = formatTokenIds(promptTokenIds, promptTokenCount);
-        std::free(const_cast<int32_t*>(promptTokenIds));
-        lastManualPromptTokenCount_ = static_cast<int>(promptTokenCount);
-
-        if (promptTokenCount >= static_cast<uint32_t>(maxAllTokens_)) {
-            throw std::runtime_error(
-                "Input token count " + std::to_string(promptTokenCount) +
-                " reaches max_all_token " + std::to_string(maxAllTokens_) +
-                "; no output-token budget remains.");
-        }
-        const uint32_t remainingTokenBudget =
-            static_cast<uint32_t>(maxAllTokens_) - promptTokenCount;
-        const uint32_t outputTokenBudget =
-            remainingTokenBudget < static_cast<uint32_t>(maxOutputTokens_)
-                ? remainingTokenBudget
-                : static_cast<uint32_t>(maxOutputTokens_);
-        status = GenieDialog_setMaxNumTokens(dialog_, outputTokenBudget);
-        if (status != GENIE_STATUS_SUCCESS) {
-            throw std::runtime_error(statusMessage("GenieDialog_setMaxNumTokens", status));
-        }
+        const TokenBudget budget = prepareTokenBudget(prompt, "[queryStreaming]");
 
         struct StreamContext {
             JNIEnv* env;
@@ -645,7 +633,7 @@ public:
         LOGI("GenieDialog_queryStreaming start, inputCode=%s, promptLength=%zu",
              sentenceCodeName(sentenceCode), prompt.size());
 
-        status = GenieDialog_query(
+        Genie_Status_t status = GenieDialog_query(
             dialog_,
             prompt.c_str(),
             sentenceCode,
@@ -675,22 +663,77 @@ public:
         LOGI("GenieDialog_queryStreaming finished, status=%d, promptTokens=%u, outputTokenBudget=%u, "
              "maxAllTokens=%d, elapsedMs=%lld, resultLength=%zu, generatedTokens=%d",
              status,
-             promptTokenCount,
-             outputTokenBudget,
+             budget.promptTokenCount,
+             budget.outputTokenBudget,
              maxAllTokens_,
              static_cast<long long>(elapsedMs),
              ctx.text.size(),
              ctx.generatedTokenCount);
         lastManualGeneratedTokenCount_ = ctx.generatedTokenCount;
         return ctx.text;
-        return ctx.text;
     }
 
 private:
+    // 客户端 token 预算结果；unavailable=true 表示当前 libGenie 无 tokenizer API
+    // （QNN 2.34 时代），已跳过预算控制，promptTokenCount 无意义。
+    struct TokenBudget {
+        uint32_t promptTokenCount = 0;
+        uint32_t outputTokenBudget = 0;
+        bool unavailable = false;
+    };
+
+    // 手动 encode 计算 prompt token 数并下发本请求的输出预算。
+    // libGenie 缺 API 时降级为跳过（计数保持 -1，界面显示不可用）。
+    TokenBudget prepareTokenBudget(const std::string& prompt, const char* logPrefix) {
+        api_.resolve();
+        TokenBudget budget;
+        if (!api_.available()) {
+            budget.unavailable = true;
+            LOGW("%s tokenizer APIs unavailable in this libGenie build; "
+                 "skip client-side token budgeting", logPrefix);
+            return budget;
+        }
+        GenieTokenizer_Handle_t tokenizer = nullptr;
+        Genie_Status_t status = api_.getTokenizer(dialog_, &tokenizer);
+        if (status != GENIE_STATUS_SUCCESS || !tokenizer) {
+            throw std::runtime_error(statusMessage("GenieDialog_getTokenizer", status));
+        }
+        const int32_t* promptTokenIds = nullptr;
+        status = api_.tokenizerEncode(tokenizer, prompt.c_str(), profileAllocCallback,
+                                      &promptTokenIds, &budget.promptTokenCount);
+        if (status != GENIE_STATUS_SUCCESS) {
+            throw std::runtime_error(statusMessage("GenieTokenizer_encode", status));
+        }
+        std::string idsLog = logPrefix + std::string(" prompt");
+        logTokenIds(idsLog.c_str(), promptTokenIds, budget.promptTokenCount);
+        lastManualPromptTokenIds_ = formatTokenIds(promptTokenIds, budget.promptTokenCount);
+        std::free(const_cast<int32_t*>(promptTokenIds));
+        lastManualPromptTokenCount_ = static_cast<int>(budget.promptTokenCount);
+
+        if (budget.promptTokenCount >= static_cast<uint32_t>(maxAllTokens_)) {
+            throw std::runtime_error(
+                "Input token count " + std::to_string(budget.promptTokenCount) +
+                " reaches max_all_token " + std::to_string(maxAllTokens_) +
+                "; no output-token budget remains.");
+        }
+        const uint32_t remainingTokenBudget =
+            static_cast<uint32_t>(maxAllTokens_) - budget.promptTokenCount;
+        budget.outputTokenBudget =
+            remainingTokenBudget < static_cast<uint32_t>(maxOutputTokens_)
+                ? remainingTokenBudget
+                : static_cast<uint32_t>(maxOutputTokens_);
+        status = api_.setMaxNumTokens(dialog_, budget.outputTokenBudget);
+        if (status != GENIE_STATUS_SUCCESS) {
+            throw std::runtime_error(statusMessage("GenieDialog_setMaxNumTokens", status));
+        }
+        return budget;
+    }
+
     GenieDialogConfig_Handle_t config_ = nullptr;
     GenieDialog_Handle_t dialog_ = nullptr;
     GenieProfile_Handle_t profile_ = nullptr;
     GenieLog_Handle_t log_ = nullptr;
+    OptionalGenieApi api_;
     int maxAllTokens_ = 256;
     int maxOutputTokens_;
     int lastManualPromptTokenCount_ = -1;
@@ -731,7 +774,7 @@ Java_com_qairt_qwen3htp_GenieNative_version(JNIEnv* env, jclass) {
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_qairt_qwen3htp_GenieNative_create(JNIEnv* env,
                                                   jclass,
-                                                   jstring modelRoot,
+                                                   jstring modelRoot, jstring dspRoot,
                                                    jint contextSize,
                                                    jint maxTokens,
                                                    jint maxOutputTokens,
@@ -740,10 +783,11 @@ Java_com_qairt_qwen3htp_GenieNative_create(JNIEnv* env,
                                                  jint topK,
                                                  jfloat topP,
                                                  jfloat temperature,
-                                                 jfloat presencePenalty) {
+                                                 jfloat presencePenalty,
+                                                 jint htpArch) {
     try {
         auto session = std::make_unique<GenieSession>(
-            toString(env, modelRoot),
+            toString(env, modelRoot), toString(env, dspRoot),
             static_cast<int>(contextSize),
             static_cast<int>(maxTokens),
             static_cast<int>(maxOutputTokens),
@@ -752,7 +796,8 @@ Java_com_qairt_qwen3htp_GenieNative_create(JNIEnv* env,
             static_cast<int>(topK),
             static_cast<float>(topP),
             static_cast<float>(temperature),
-            static_cast<float>(presencePenalty));
+            static_cast<float>(presencePenalty),
+            static_cast<int>(htpArch));
         return reinterpret_cast<jlong>(session.release());
     } catch (const std::exception& e) {
         throwJava(env, e);

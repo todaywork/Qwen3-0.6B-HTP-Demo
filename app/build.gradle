@@ -13,12 +13,6 @@ android {
         versionCode 1
         versionName "1.0"
 
-        def diagnosticsEnabled = providers.gradleProperty("enableNpuDiagnostics")
-                .map { it.toBoolean() }
-                .orElse(true)
-                .get()
-        buildConfigField "boolean", "NPU_DIAGNOSTICS_ENABLED", diagnosticsEnabled.toString()
-
         ndk {
             abiFilters "arm64-v8a"
         }
@@ -27,6 +21,50 @@ android {
             cmake {
                 cppFlags "-std=c++17 -fexceptions -frtti"
             }
+        }
+    }
+
+    flavorDimensions "htp", "qnn"
+    productFlavors {
+        v68 {
+            dimension "htp"
+            versionNameSuffix "-v68"
+            externalNativeBuild.cmake.arguments "-DHTP_ARCH=68"
+        }
+        v73 {
+            dimension "htp"
+            versionNameSuffix "-v73"
+            externalNativeBuild.cmake.arguments "-DHTP_ARCH=73"
+        }
+        qnn234 {
+            dimension "qnn"
+            versionNameSuffix "-qnn234"
+            externalNativeBuild.cmake.arguments "-DQNN_VER=234"
+        }
+        qnn246 {
+            dimension "qnn"
+            versionNameSuffix "-qnn246"
+            externalNativeBuild.cmake.arguments "-DQNN_VER=246"
+        }
+    }
+
+    // Channel-specific app names, e.g. "Qwen3 0.6B HTP Demo V68 QNN246".
+    // (single-flavor resValue would override each other across dimensions)
+    androidComponents {
+        onVariants(selector().all()) { variant ->
+            def names = variant.productFlavors.collect { it.second.toUpperCase() }
+            variant.resValues.put(
+                variant.makeResValueKey("string", "app_name"),
+                new com.android.build.api.variant.ResValue(
+                    "Qwen3 0.6B HTP Demo " + names.join(" "), null))
+        }
+    }
+
+    // Legacy mixed runtime directories are intentionally excluded from every APK.
+    sourceSets {
+        main {
+            jniLibs.srcDirs = []
+            assets.srcDirs = []
         }
     }
 
@@ -50,7 +88,4 @@ android {
 
 dependencies {
     implementation "androidx.core:core:1.13.1"
-    if (findProject(":npu-diagnostics") != null) {
-        implementation project(":npu-diagnostics")
-    }
 }

@@ -1,0 +1,17 @@
+{
+  "architecture": 68,
+  "source": "E:\\QualComm\\ai-hub-compiles\\qwen3_0_6b-geniex_qairt-w4a16-qualcomm-sa8295p-ctx512-qnn234-local",
+  "sha256": {
+    "jniLibs/arm64-v8a/libGenie.so": "3b170413596144bc399e81b6def4693ebf055a974fa6f2c9d58cb03cbd4206d1",
+    "jniLibs/arm64-v8a/libQnnHtp.so": "fc2c61b762e925f0bc90edda0bd469de92d167611559e6966f4fce97afe84821",
+    "jniLibs/arm64-v8a/libQnnHtpNetRunExtensions.so": "1a1ca1cf6b8934416f60569280e9cef4fc31fcc7ce4d6c255462786b05acee0b",
+    "jniLibs/arm64-v8a/libQnnHtpV68Stub.so": "47cb5c677f311a73177e3a42c8e5548c970e3395db33df44a888511ab79168ff",
+    "jniLibs/arm64-v8a/libQnnSystem.so": "49b8b4efbf44747363d0b86ecfed37c2b521d12a014411962d7cf2bf8a3f3cfe",
+    "assets/qnn/v68/dsp/libc++.so.1": "e5ba335da642eb96be60b1d7eb32eb437ed51df5e3fd462eaa10c060e5a0e76e",
+    "assets/qnn/v68/dsp/libc++abi.so.1": "c8bd47d9c598590c35b5d4a3899aba06f6453cd817261e01261a10686326166c",
+    "assets/qnn/v68/dsp/libQnnHtp.so": "fc2c61b762e925f0bc90edda0bd469de92d167611559e6966f4fce97afe84821",
+    "assets/qnn/v68/dsp/libQnnHtpV68.so": "f1b0592e9c6cdedadabea67c8b41f452799b372ee47f5d1efef865ddee68f038",
+    "assets/qnn/v68/dsp/libQnnHtpV68Skel.so": "ebe77e3336b250d1e7e9722e26f1ea81e29150b292ab13c06fa6e8b4963dc4d7",
+    "assets/qnn/v68/dsp/libQnnSystem.so": "a2bab35ca3e3bd84a5e6078a98fee4eb1a045874ac5fc712895fb1c343e44061"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "architecture": 68,
+  "source": "E:\\QualComm\u0007i-hub-compiles\\qwen3_0_6b-geniex_qairt-w4a16-sa8295-ctx512-qairt246-local",
+  "sha256": {
+    "assets/qnn/v68/dsp/libQnnHtp.so": "50e27cc07662bd6a0787dc71ed77eefb7d4965504ab7652d52f7ce0920bd82f6",
+    "assets/qnn/v68/dsp/libQnnHtpV68.so": "68a97162087594e1a1258171564093daf6738af0508a00c576b105ed86de9a2f",
+    "assets/qnn/v68/dsp/libQnnHtpV68Skel.so": "4f211a1b0080b820e855951d0ba90da977596179b06858447c5b326b8faa3105",
+    "assets/qnn/v68/dsp/libQnnSystem.so": "1d223892d7fc11ebbaae6741c6fe5a912d2922f75576287361753df0461a1a4e",
+    "jniLibs/arm64-v8a/libGenie.so": "65f1a8bb9bf0f2d6e3455db383dfec5693f7012b5a1c9b5faa0e3353a8548a6a",
+    "jniLibs/arm64-v8a/libQnnHtp.so": "50e27cc07662bd6a0787dc71ed77eefb7d4965504ab7652d52f7ce0920bd82f6",
+    "jniLibs/arm64-v8a/libQnnHtpNetRunExtensions.so": "f1cacf9fc7c67dc6630568dead86f03cd9ec4ea120f917a047a61c306480be6a",
+    "jniLibs/arm64-v8a/libQnnHtpV68Stub.so": "f7f0cfe80efffa21396b5d5b7e84ffda5c3e0bd41eab41e7ab6748ab88bc240d",
+    "jniLibs/arm64-v8a/libQnnSystem.so": "7401dde8de30f9a627068e33a403e53a8b470b3c002bd05115133881826da9f6"
+  }
+}
