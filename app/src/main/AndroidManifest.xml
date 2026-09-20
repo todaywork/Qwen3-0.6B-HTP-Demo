@@ -2,9 +2,10 @@
     <application
         android:allowBackup="false"
         android:icon="@drawable/ic_launcher"
-        android:label="Qwen3 0.6B HTP Demo"
+        android:label="@string/app_name"
         android:roundIcon="@drawable/ic_launcher"
         android:theme="@style/AppTheme">
+        <!--使用系统提供的这两个原生库；即使设备没有这些库，也允许安装 App-->
         <uses-native-library android:name="libcdsprpc.so" android:required="false" />
         <uses-native-library android:name="libadsprpc.so" android:required="false" />
 
@@ -22,7 +23,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:icon="@drawable/ic_launcher"
-            android:label="Qwen3 0.6B HTP Demo">
+            android:label="@string/app_name">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

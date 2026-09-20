@@ -1,0 +1,62 @@
+{
+  "time": "2026-09-17T11:39:51",
+  "adb": "E:\\QualComm\\shangqi_S32L\\windows_adb_7.1.39_20230925\\adb.exe",
+  "host_channel": true,
+  "serial": "5c782148",
+  "device_info": "Linux IVI 5.4.134 #1 SMP PREEMPT Mon Aug 3 05:03:33 CST 2026 aarch64 GNU/Linux",
+  "libraries": [
+    {
+      "path": "/usr/lib64/libQnnGpu.so",
+      "mapped_in_requested_pid": false,
+      "build_ids": [
+        "v2.20.0.240223161333_83920-auto"
+      ],
+      "status": "build_id_found"
+    },
+    {
+      "path": "/usr/lib64/libQnnHtp.so",
+      "mapped_in_requested_pid": true,
+      "build_ids": [
+        "v2.20.0.240223161333_83920-auto"
+      ],
+      "status": "build_id_found"
+    },
+    {
+      "path": "/usr/lib64/libQnnHtpPrepare.so",
+      "mapped_in_requested_pid": false,
+      "build_ids": [
+        "v2.20.0.240223161333_83920-auto",
+        "v2.20.0.240223161333_83920-auto.7994e49abb"
+      ],
+      "status": "build_id_found"
+    },
+    {
+      "path": "/usr/lib64/libQnnHtpV68Skel.so",
+      "mapped_in_requested_pid": false,
+      "build_ids": [
+        "v2.20.0.240223161333_83920-auto",
+        "v2.20.0.240223161333_83920-auto.7994e49abb"
+      ],
+      "status": "build_id_found"
+    },
+    {
+      "path": "/usr/lib64/libQnnHtpV68Stub.so",
+      "mapped_in_requested_pid": true,
+      "build_ids": [
+        "v2.20.0.240223161333_83920-auto"
+      ],
+      "status": "build_id_found"
+    },
+    {
+      "path": "/usr/lib64/libQnnSystem.so",
+      "mapped_in_requested_pid": true,
+      "build_ids": [],
+      "status": "no_build_id_string"
+    }
+  ],
+  "discovery_errors": [],
+  "scope": "Library file build IDs; presence alone does not prove a running app uses them.",
+  "pid": 6075,
+  "maps_readable": true,
+  "any_build_id_found": true
+}

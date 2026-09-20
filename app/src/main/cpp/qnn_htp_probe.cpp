@@ -9,6 +9,7 @@
 #include <dlfcn.h>
 
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <sstream>
 #include <string>
@@ -16,6 +17,9 @@
 namespace {
 
 constexpr const char* kTag = "QnnHtpProbe";
+
+// 探测使用的固定 HTP 架构（无 Java 调用入口，独立诊断时用）：68=SA8295P，73=SA8255P/SA8775P。
+constexpr int kHtpArch = 68;
 
 using QnnInterfaceGetProvidersFn =
     Qnn_ErrorHandle_t (*)(const QnnInterface_t*** providerList, uint32_t* numProviders);
@@ -88,9 +92,14 @@ Java_com_qairt_qwen3htp_MainActivity_probeHtpNative(JNIEnv* env,
 
   void* systemHandle = openLibrary(out, nativeLibDir + "/libQnnSystem.so", RTLD_NOW | RTLD_GLOBAL);
   void* htpPrepareHandle = openLibrary(out, nativeLibDir + "/libQnnHtpPrepare.so", RTLD_NOW | RTLD_GLOBAL);
-  void* htpStubHandle = openLibrary(out, nativeLibDir + "/libQnnHtpV73Stub.so", RTLD_NOW | RTLD_GLOBAL);
+  appendLine(out, "fixed htpArch=" + std::to_string(kHtpArch) + " (hardcoded, not from device)");
+  char stubName[64];
+  char calcStubName[64];
+  std::snprintf(stubName, sizeof(stubName), "libQnnHtpV%dStub.so", kHtpArch);
+  std::snprintf(calcStubName, sizeof(calcStubName), "libQnnHtpV%dCalculatorStub.so", kHtpArch);
+  void* htpStubHandle = openLibrary(out, nativeLibDir + "/" + stubName, RTLD_NOW | RTLD_GLOBAL);
   void* htpCalcHandle =
-      openLibrary(out, nativeLibDir + "/libQnnHtpV73CalculatorStub.so", RTLD_NOW | RTLD_GLOBAL);
+      openLibrary(out, nativeLibDir + "/" + calcStubName, RTLD_NOW | RTLD_GLOBAL);
   void* backendHandle = openLibrary(out, nativeLibDir + "/libQnnHtp.so", RTLD_NOW | RTLD_GLOBAL);
 
   if (backendHandle == nullptr) {

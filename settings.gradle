@@ -16,11 +16,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "Qwen3HtpDemo"
 include ":app"
-
-def enableNpuDiagnostics = providers.gradleProperty("enableNpuDiagnostics")
-        .map { it.toBoolean() }
-        .orElse(true)
-        .get()
-if (enableNpuDiagnostics) {
-    include ":npu-diagnostics"
-}

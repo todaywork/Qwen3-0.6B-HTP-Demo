@@ -6,6 +6,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -62,7 +63,7 @@ public class MainActivity extends Activity {
     private final Handler                      mainHandler  = new Handler(Looper.getMainLooper());
     private final List<BatchResult>            batchResults = new ArrayList<>();
     private final List<PromptBuilder.ChatTurn> chatHistory  = new ArrayList<>();
-
+   
     private TextView    outputView;
     private TextView    statusView;
     private TextView    metricsView;
@@ -88,7 +89,6 @@ public class MainActivity extends Activity {
     private Button      resetPromptButton;
     private Button      openFolderButton;
     private Button      shareFileButton;
-    private Button      diagnosticsButton;
 
     private          GenieInferenceEngine engine;
     private          int                  contextSize;
@@ -149,13 +149,6 @@ public class MainActivity extends Activity {
         statusView.setTextColor(Color.rgb(75, 85, 99));
         statusView.setPadding(0, dp(6), 0, dp(12));
         root.addView(statusView, new LinearLayout.LayoutParams(-1, -2));
-
-        if (BuildConfig.NPU_DIAGNOSTICS_ENABLED) {
-            diagnosticsButton = new Button(this);
-            diagnosticsButton.setText("NPU 能力检测");
-            diagnosticsButton.setOnClickListener(v -> openNpuDiagnostics());
-            root.addView(diagnosticsButton, new LinearLayout.LayoutParams(-1, -2));
-        }
 
         LinearLayout configCard = addCard(root, "运行配置");
         configCard.addView(label("System Prompt"));
@@ -387,11 +380,35 @@ public class MainActivity extends Activity {
         return params;
     }
 
+    private String modelRoot() {
+        // App-private, per-channel models work with SELinux Enforcing and multi-user Android.
+        File privateRoot = new File(getFilesDir(), "models/" + BuildConfig.FLAVOR);
+        if (privateRoot.isDirectory()) return privateRoot.getAbsolutePath();
+        return MODEL_ROOT;
+    }
+
     private String defaultStatusText() {
-        return "Genie: " + GenieNative.version()
-                + "\nRoute: Genie / QnnHtp / Qwen3-0.6B / HTP V73"
-                + "\nTarget device: SA8255P"
-                + "\nModel root: " + MODEL_ROOT;
+        int arch = resolveHtpArch();
+        return "Genie: 在开始推理时加载"
+                + "\nRoute: Genie / QnnHtp / Qwen3-0.6B / HTP " + archLabel(arch)
+                + "\nHTP arch: " + arch + " (Build.SOC_MODEL='" + socModel()
+                + "', channel " + BuildConfig.FLAVOR + ")"
+                + "\nTarget device: " + Architecture.TARGET
+                + "\nModel root: " + modelRoot();
+    }
+
+    /** Build.SOC_MODEL 的取值（本机 S32X1 上该属性为空串）。 */
+    private static String socModel() {
+        return Build.VERSION.SDK_INT >= 31 && Build.SOC_MODEL != null ? Build.SOC_MODEL : "";
+    }
+
+    /** Architecture is fixed by the selected Gradle source set. */
+    private static int resolveHtpArch() {
+        return Architecture.HTP_ARCH;
+    }
+
+    private static String archLabel(int arch) {
+        return "V" + arch;
     }
 
     private String defaultMetricsText(int maxOutputTokens) {
@@ -497,7 +514,6 @@ public class MainActivity extends Activity {
         metricsView.setText(defaultMetricsText(maxOutputTokens));
         outputView.setText("推理结果会显示在这里。");
         setBusy(true);
-        startPerformanceMonitor();
 
         executor.execute(() -> {
             try {
@@ -508,7 +524,7 @@ public class MainActivity extends Activity {
                         || maxOutputTokens != engineMaxOutputTokens) {
                     if (engine != null)
                         engine.close();
-                    engine = new GenieInferenceEngine(MODEL_ROOT, contextSize, maxAllToken,
+                    engine = new GenieInferenceEngine(modelRoot(), DspRuntime.prepare(this), resolveHtpArch(), contextSize, maxAllToken,
                             maxOutputTokens, THREAD_COUNT, GREEDY, TOP_K, TOP_P,
                             TEMPERATURE, PRESENCE_PENALTY);
                     engineSystemPrompt = builtSystemPrompt;
@@ -594,8 +610,6 @@ public class MainActivity extends Activity {
                     exportStatusView.setText("状态：生成失败");
                     setBusy(false);
                 });
-            } finally {
-                mainHandler.post(this::stopPerformanceMonitor);
             }
         });
     }
@@ -818,48 +832,7 @@ public class MainActivity extends Activity {
         maxOutputTokensEdit.setEnabled(!busy);
         reuseKvCacheCheckBox.setEnabled(!busy);
         updateBatchSourceUi();
-        if (diagnosticsButton != null)
-            diagnosticsButton.setEnabled(!busy);
         progressBar.setVisibility(busy ? View.VISIBLE : View.GONE);
-    }
-
-    /**
-     * Class-name intents keep the app source independent from the optional module.
-     */
-    private void openNpuDiagnostics() {
-        Intent intent = new Intent();
-        intent.setClassName(getPackageName(), "com.qairt.npudiagnostics.NpuDiagnosticsActivity");
-        try {
-            startActivity(intent);
-        } catch (Exception e) {
-            Toast.makeText(this, "诊断模块未安装", Toast.LENGTH_LONG).show();
-        }
-    }
-
-    private void startPerformanceMonitor() {
-        if (!BuildConfig.NPU_DIAGNOSTICS_ENABLED)
-            return;
-        Intent intent = new Intent("com.qairt.npudiagnostics.START_MONITOR");
-        intent.setClassName(getPackageName(), "com.qairt.npudiagnostics.PerformanceMonitorService");
-        intent.putExtra("target_pid", android.os.Process.myPid());
-        intent.putExtra("session_id", String.valueOf(System.currentTimeMillis()));
-        try {
-            startService(intent);
-        } catch (Exception e) {
-            Log.w(TAG, "Performance monitor unavailable", e);
-        }
-    }
-
-    private void stopPerformanceMonitor() {
-        if (!BuildConfig.NPU_DIAGNOSTICS_ENABLED)
-            return;
-        Intent intent = new Intent("com.qairt.npudiagnostics.STOP_MONITOR");
-        intent.setClassName(getPackageName(), "com.qairt.npudiagnostics.PerformanceMonitorService");
-        try {
-            startService(intent);
-        } catch (Exception e) {
-            Log.w(TAG, "Could not stop performance monitor", e);
-        }
     }
 
     private int dp(int value) {

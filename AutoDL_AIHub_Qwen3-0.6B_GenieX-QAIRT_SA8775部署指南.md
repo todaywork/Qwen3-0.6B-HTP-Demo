@@ -137,6 +137,24 @@ find "$SOURCE_CHECKPOINT" -maxdepth 1 -type f \( -name '*.safetensors' -o -name 
 
 建议同时确认 `config.json` 中的模型类型、层数、hidden size 和 attention heads 与 Qwen3-0.6B 一致。
 
+### 5.1 检查并替换校准语料
+
+生成chatjinja模板的校准语料：
+
+D:\QAIRT-Workspace\android-apps\Qwen3-0.6B-HTP-Demo\calib_v5
+
+执行脚本。生成校准语料。
+
+**在第一次跑量化之前**就预置文件，一劳永逸：直接替换训练语料
+
+```bash
+mkdir -p /root/autodl-tmp/qaihm-store/.qaihm/qai-hub-models/datasets/generated_calibration_qwen3_0_6b/v1/
+cp /path/to/your/generated_calibration_v5.txt \
+   /root/autodl-tmp/qaihm-store/.qaihm/qai-hub-models/datasets/generated_calibration_qwen3_0_6b/v1/generated_calibration.txt
+```
+
+
+
 ## 6. W4A16 量化
 
 先查看当前安装版本实际支持的参数：
@@ -165,11 +183,11 @@ set -o pipefail
     --precision w4a16 \
     --use-spin-quant r2,r3 \
     --use-seq-mse \
-    --seq-mse-num-samples 12 \
+    --seq-mse-num-samples 12 \  --24
     --use-ada-scale \
     --ada-scale-num-samples 48 \
     --ada-scale-num-iterations 2048 \
-    --num-samples 24 \
+    --num-samples 24 \  ---校准数据,48
     --context-length 4096 \
     --calibration-sequence-length 2048 \
     --output-dir /root/autodl-tmp/qwen3_car_w4a16_cl4096_v22 \
@@ -177,6 +195,9 @@ set -o pipefail
 
 # 实时查看日志
 tail -f /root/autodl-tmp/logs/quantize_w4a16_cl4096_v22.log
+
+# 062版本的量化命令：
+
 ```
 
 以上参数基于 Qualcomm 官方 Qwen3-0.6B W4A16 checkpoint 的 `args.json`，仅将 AdaScale 样本数从 128 调整为 48
@@ -193,8 +214,8 @@ tail -f /root/autodl-tmp/logs/quantize_w4a16_cl4096_v22.log
 # 正常执行
 /root/autodl-tmp/conda-envs/qaihm060/bin/python \
   /root/autodl-tmp/tools/validate_qwen3_v17_v18.py \
-  --checkpoint /root/autodl-tmp/qwen3_car_w4a16_cl4096_v21 \
-  --version v21
+  --checkpoint /root/autodl-tmp/qwen3_car_w4a16_cl4096_v23 \
+  --version v23
   
 # 自动跑完全部流程：
 /root/autodl-tmp/conda-envs/qaihm060/bin/python \
@@ -381,7 +402,7 @@ JSON 中必须满足：
   
 # 指定提示词推理
 /root/autodl-tmp/conda-envs/qaihm060/bin/python -m qai_hub_models.models.qwen3_0_6b.demo \
-  --checkpoint /root/autodl-tmp/qwen3_car_w4a16_cl4096_v17 \
+  --checkpoint /root/autodl-tmp/qwen3_car_w4a16_cl4096_v23 \
   --max-output-tokens 64 \
   --context-length 512 \
   --sequence-length 128 1 \
@@ -393,6 +414,9 @@ JSON 中必须满足：
 # 批跑验证
 cd  /root/autodl-tmp/
 python smoke20/run_smoke20.py /root/autodl-tmp/qwen3_car_w4a16_cl4096_v21 v21
+# 新协议
+cd  /root/autodl-tmp/smoke20
+python run_smoke_v5.py /root/autodl-tmp/qwen3_car_w4a16_cl4096_v23_062 v23_062
 ```
 
 若 `demo --help` 显示还需要 context/sequence 参数，按当前版本帮助补充。
@@ -465,17 +489,63 @@ env \
   HF_ENDPOINT=https://hf-mirror.com \
   HF_HUB_DISABLE_XET=1 \
   QAIHM_CLI_VERBOSE_EXCEPTIONS=1 \
-  /root/autodl-tmp/conda-envs/qaihm060/bin/python -m qai_hub_models.models.qwen3_0_6b.export \
-  --checkpoint /root/autodl-tmp/qwen3_car_w4a16_cl4096_v21 \
+  /root/autodl-tmp/conda-envs/qaihm062/bin/python -m qai_hub_models.models.qwen3_0_6b.export \
+  --checkpoint /root/autodl-tmp/qwen3_car_w4a16_cl4096_v23_062 \
   --target-runtime geniex_qairt \
   --device "SA8775P ADP" \
   --device-os 14 \
   --sequence-lengths 128,1 \
   --context-lengths 512 \
   --skip-profiling \
-  --output-dir /root/autodl-tmp/output/export_sa8775p_ctx512_v21 \
+  --output-dir /root/autodl-tmp/output/export_sa8775p_ctx512_v23_062 \
   --zip-assets \
-  2>&1 | tee /root/autodl-tmp/logs/export_sa8775p_ctx512_v21.log
+  2>&1 | tee /root/autodl-tmp/logs/export_sa8775p_ctx512_v23_062.log
+  
+# 编译8295
+mkdir -p /root/autodl-tmp/output/export_sa8775p_multictx /root/autodl-tmp/logs
+cd /root/autodl-tmp/ai-hub-models-0.60.0
+set -o pipefail
+env \
+  TMPDIR=/root/autodl-tmp/tmp \
+  TMP=/root/autodl-tmp/tmp \
+  HF_HOME=/root/autodl-tmp/hf-cache \
+  QAIHM_STORE_ROOT=/root/autodl-tmp/qaihm-store \
+  HF_ENDPOINT=https://hf-mirror.com \
+  HF_HUB_DISABLE_XET=1 \
+  QAIHM_CLI_VERBOSE_EXCEPTIONS=1 \
+  /root/autodl-tmp/conda-envs/qaihm060/bin/python -m qai_hub_models.models.qwen3_0_6b.export \
+  --checkpoint /root/autodl-tmp/qwen3_car_w4a16_cl4096_v23 \
+  --target-runtime geniex_qairt \
+  --device "SA8295P ADP" \
+  --device-os 14 \
+  --sequence-lengths 128,1 \
+  --context-lengths 512 \
+  --skip-profiling \
+  --output-dir /root/autodl-tmp/output/export_sa8295p_ctx512_v23_01 \
+  --zip-assets \
+  2>&1 | tee /root/autodl-tmp/logs/export_ssa8295p_ctx512_v23_01.log
+
+# 062版本编译命令
+set -o pipefail
+env \
+  TMPDIR=/root/autodl-tmp/tmp \
+  TMP=/root/autodl-tmp/tmp \
+  HF_HOME=/root/autodl-tmp/hf-cache \
+  QAIHM_STORE_ROOT=/root/autodl-tmp/qaihm-store \
+  HF_ENDPOINT=https://hf-mirror.com \
+  HF_HUB_DISABLE_XET=1 \
+  QAIHM_CLI_VERBOSE_EXCEPTIONS=1 \
+  /root/autodl-tmp/conda-envs/qaihm062/bin/python -m qai_hub_models.models.qwen3_0_6b.export \
+  --checkpoint /root/autodl-tmp/qwen3_car_w4a16_cl4096_v23_062 \
+  --target-runtime geniex_qairt \
+  --device "SA8775P ADP" \
+  --device-os 14 \
+  --sequence-lengths 128,1 \
+  --context-lengths 512 \
+  --skip-profiling \
+  --output-dir /root/autodl-tmp/output/export_sa8775p_ctx512_v23_062 \
+  --zip-assets \
+  2>&1 | tee /root/autodl-tmp/logs/export_sa8775p_ctx512_v23_062.log
 ```
 
 说明：

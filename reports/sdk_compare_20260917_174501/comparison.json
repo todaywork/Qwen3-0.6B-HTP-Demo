@@ -1,0 +1,37 @@
+{
+  "directory_a": "E:\\QualComm\\AIStack\\QAIRT\\v2.45.0.260326_common",
+  "directory_b": "E:\\QualComm\\AIStack\\QAIRT\\2.45.0.260326",
+  "file_count_a": 9658,
+  "file_count_b": 9656,
+  "bytes_a": 4044176671,
+  "bytes_b": 4037589263,
+  "common_files": 9656,
+  "identical_files": 9656,
+  "only_a": [
+    "lib/aarch64-android/libQnnHtp.so",
+    "lib/aarch64-android/libQnnSystem.so"
+  ],
+  "only_b": [],
+  "changed_or_errors": [],
+  "directories_only_a": [
+    "docs/QAIRT-Docs/QNN/_static/resources/fonts/QualcommNextFont/__MACOSX",
+    "docs/QAIRT-Docs/QNN/_static/resources/fonts/QualcommNextFont/__MACOSX/OTF-23-June 8",
+    "docs/QAIRT-Docs/QNN/_static/resources/fonts/QualcommNextFont/__MACOSX/TTF-23-MARCH-18",
+    "docs/QAIRT-Docs/QNN/_static/resources/fonts/QualcommNextFont/__MACOSX/WEB-23-MARCH-18",
+    "docs/QAIRT-Docs/SNPE/_static/fonts/QualcommNextFont/__MACOSX",
+    "docs/QAIRT-Docs/SNPE/_static/fonts/QualcommNextFont/__MACOSX/OTF-23-June 8",
+    "docs/QAIRT-Docs/SNPE/_static/fonts/QualcommNextFont/__MACOSX/TTF-23-MARCH-18",
+    "docs/QAIRT-Docs/SNPE/_static/fonts/QualcommNextFont/__MACOSX/WEB-23-MARCH-18",
+    "docs/QAIRT-Docs/_static/resources/fonts/QualcommNextFont/__MACOSX",
+    "docs/QAIRT-Docs/_static/resources/fonts/QualcommNextFont/__MACOSX/OTF-23-June 8",
+    "docs/QAIRT-Docs/_static/resources/fonts/QualcommNextFont/__MACOSX/TTF-23-MARCH-18",
+    "docs/QAIRT-Docs/_static/resources/fonts/QualcommNextFont/__MACOSX/WEB-23-MARCH-18",
+    "examples/SNPE/android/image-classifiers/app/src/main/res/raw",
+    "examples/SNPE/android/psnpe-demo/app/src/main/res/drawable"
+  ],
+  "directories_only_b": [],
+  "links_a": {},
+  "links_b": {},
+  "scan_errors": [],
+  "all_file_content_identical": false
+}

@@ -6,6 +6,8 @@ final class GenieInferenceEngine implements AutoCloseable {
     private static final String TAG = "Qwen3HtpDemo";
 
     private final String modelRoot;
+    private final String dspRoot;
+    private final int htpArch;
     private final int contextSize;
     private final int maxTokens;
     private final int maxOutputTokens;
@@ -22,10 +24,12 @@ final class GenieInferenceEngine implements AutoCloseable {
     private RunMetrics lastMetrics;
     private String lastInputTokenIds = "[]";
 
-    GenieInferenceEngine(String modelRoot, int contextSize, int maxTokens, int maxOutputTokens,
+    GenieInferenceEngine(String modelRoot, String dspRoot, int htpArch, int contextSize, int maxTokens, int maxOutputTokens,
                          int threadCount, boolean greedy, int topK, float topP,
                          float temperature, float presencePenalty) {
         this.modelRoot = modelRoot;
+        this.dspRoot = dspRoot;
+        this.htpArch = htpArch;
         this.contextSize = contextSize;
         this.maxTokens = maxTokens;
         this.maxOutputTokens = maxOutputTokens;
@@ -111,10 +115,13 @@ final class GenieInferenceEngine implements AutoCloseable {
 
     private void ensureSession() {
         if (nativeHandle != 0) return;
+        // Load inside the inference worker so missing device libraries are reported
+        // by the existing batch error handler instead of crashing Activity.onCreate.
+        GenieNative.loadLibraries(htpArch);
         Log.i(TAG, "Creating native Genie session.");
         long start = System.nanoTime();
-        nativeHandle = GenieNative.create(modelRoot, contextSize, maxTokens, maxOutputTokens,
-                threadCount, greedy, topK, topP, temperature, presencePenalty);
+        nativeHandle = GenieNative.create(modelRoot, dspRoot, contextSize, maxTokens, maxOutputTokens,
+                threadCount, greedy, topK, topP, temperature, presencePenalty, htpArch);
         sessionCreateMs = (System.nanoTime() - start) / 1_000_000L;
         Log.i(TAG, "Native Genie session created, handle=" + nativeHandle);
     }
