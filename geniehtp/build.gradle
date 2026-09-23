@@ -31,7 +31,7 @@ android {
         v68 {
             dimension "htp"
             // Genie HTP "use-mmap" 开关：按渠道写死，不再支持 -PuseMmap。
-            buildConfigField "boolean", "USE_MMAP", "true"
+            buildConfigField "boolean", "USE_MMAP", "false"
             externalNativeBuild.cmake.arguments "-DHTP_ARCH=68"
         }
         v73 {

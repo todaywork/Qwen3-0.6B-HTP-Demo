@@ -14,8 +14,8 @@ public final class EngineConfig {
 
     private static final int     DEFAULT_CONTEXT_SIZE      = 512;
     private static final int     DEFAULT_MAX_TOKENS        = 256;
-    private static final int     DEFAULT_MAX_OUTPUT_TOKENS = 128;
-    private static final int     DEFAULT_THREAD_COUNT      = 4;
+    private static final int     DEFAULT_MAX_OUTPUT_TOKENS = 48;
+    private static final int     DEFAULT_THREAD_COUNT      = 12;
     private static final boolean DEFAULT_GREEDY            = true;
     private static final int     DEFAULT_TOP_K             = 40;
     private static final float   DEFAULT_TOP_P             = 0.95f;

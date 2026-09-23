@@ -259,6 +259,12 @@ std::string buildConfig(const std::string& modelRoot, const std::string& dspRoot
                         float presencePenalty,
                         int htpArch,
                         bool useMmap) {
+#if QNN_VER == 234
+    // Genie 2.34 rejects sampler.token-penalty at schema validation.
+    if (presencePenalty != 0.0f) {
+        throw std::runtime_error("presencePenalty is unsupported by the QNN 2.34 CLI-compatible config");
+    }
+#endif
     const std::string tokenizer = modelRoot + "/tokenizer.json";
     const std::string htpConfig = modelRoot + "/htp_backend_ext_config.json";
     const std::string ctxBin1 = modelRoot + "/part1_of_2.bin";
@@ -292,9 +298,12 @@ std::string buildConfig(const std::string& modelRoot, const std::string& dspRoot
         << "\"sampler\":{\"version\":1,\"seed\":42,\"temp\":" << temperature
         << ",\"top-k\":" << topK << ",\"top-p\":" << topP
         << ",\"greedy\":" << (greedy ? "true" : "false")
+#if QNN_VER != 234
         << ",\"token-penalty\":{\"version\":1,\"penalize-last-n\":128,"
         << "\"repetition-penalty\":1.0,\"presence-penalty\":" << presencePenalty
-        << ",\"frequency-penalty\":0.0}},"
+        << ",\"frequency-penalty\":0.0}"
+#endif
+        << "},"
         << "\"tokenizer\":{\"version\":1,\"path\":\"" << tokenizer << "\"},"
         << "\"engine\":{"
         << "\"version\":1,"
@@ -447,6 +456,7 @@ public:
         }
 
         LOGI("GenieDialogConfig_createFromJson start, configLength=%zu", configJson.size());
+        LOGI("Genie config: %s", configJson.c_str());
         status = GenieDialogConfig_createFromJson(configJson.c_str(), &config_);
         if (status != GENIE_STATUS_SUCCESS || !config_) {
             throw std::runtime_error(statusMessage("GenieDialogConfig_createFromJson", status));

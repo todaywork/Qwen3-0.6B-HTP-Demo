@@ -10,7 +10,7 @@ endif()
 set(RUNTIME_DIR "${CMAKE_SOURCE_DIR}/../../v${HTP_ARCH}Qnn${QNN_VER}/jniLibs/${ANDROID_ABI}")
 
 add_library(qwen3genie SHARED qwen3_genie_jni.cpp)
-target_compile_definitions(qwen3genie PRIVATE HTP_ARCH=${HTP_ARCH})
+target_compile_definitions(qwen3genie PRIVATE HTP_ARCH=${HTP_ARCH} QNN_VER=${QNN_VER})
 
 target_include_directories(qwen3genie PRIVATE
         ${CMAKE_SOURCE_DIR}/qairt/include)

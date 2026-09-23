@@ -1,17 +1,16 @@
 {
   "architecture": 73,
-  "source": "E:\\QualComm\\ai-hub-compiles\\qwen3_0_6b-geniex_qairt-w4a16-sa8775p-ctx512-qairt246-local",
+  "source": "E:\\QualComm\\Qnnllm_handoff_FULL_20260617_090120\\qnn_sdk_v2.34.0_auto_qnx\\qaisw-v2.34.0.250424201103_119471-auto-qnx",
+  "sdk_build": "2.34.0.250424201103_119471-auto",
   "sha256": {
-    "jniLibs/arm64-v8a/libGenie.so": "65f1a8bb9bf0f2d6e3455db383dfec5693f7012b5a1c9b5faa0e3353a8548a6a",
-    "jniLibs/arm64-v8a/libQnnHtp.so": "50e27cc07662bd6a0787dc71ed77eefb7d4965504ab7652d52f7ce0920bd82f6",
-    "jniLibs/arm64-v8a/libQnnHtpNetRunExtensions.so": "f1cacf9fc7c67dc6630568dead86f03cd9ec4ea120f917a047a61c306480be6a",
-    "jniLibs/arm64-v8a/libQnnHtpV73Stub.so": "5c0290a6e8e47df90dd7d6c3a76d07eb0ca665854ffeb9c14022fa370668559c",
-    "jniLibs/arm64-v8a/libQnnSystem.so": "7401dde8de30f9a627068e33a403e53a8b470b3c002bd05115133881826da9f6",
-    "assets/qnn/v73/dsp/libc++.so.1": "c8f02e600973601a255ff9135a904898750e1d61eb3adb0d6fff71d2cb983398",
-    "assets/qnn/v73/dsp/libc++abi.so.1": "9defd66786f5b3d66a001b2a639f6902edbb3530778d112a5df2fab5625f173f",
-    "assets/qnn/v73/dsp/libQnnHtp.so": "50e27cc07662bd6a0787dc71ed77eefb7d4965504ab7652d52f7ce0920bd82f6",
-    "assets/qnn/v73/dsp/libQnnHtpV73.so": "1909038f4a475c244e8152d4dff6b87830ef0b04d005616245c8cbf1adc7815f",
-    "assets/qnn/v73/dsp/libQnnHtpV73Skel.so": "384c84293673b53c165733d44f8167bc29823688564e6455eaea554c4afead4f",
-    "assets/qnn/v73/dsp/libQnnSystem.so": "dda223324c384ca5bced8745548820a1bc5b33b071a0a2bf67754c5fea3e5e3c"
+    "assets/qnn/v73/dsp/libQnnHtp.so": "fc2c61b762e925f0bc90edda0bd469de92d167611559e6966f4fce97afe84821",
+    "assets/qnn/v73/dsp/libQnnHtpV73.so": "06f64ccfb5de89a63be722d396adb1dba6473c9c7b12e41b3d7730138b042317",
+    "assets/qnn/v73/dsp/libQnnHtpV73Skel.so": "7ab87c369127b270e9dfb74a798b2ee86cae72ae40919e7846d3bccbe4892227",
+    "assets/qnn/v73/dsp/libQnnSystem.so": "e2f6758bf615dc1eaca2c8ad166cbf5c19710c67ebe571c446ab17d7a1d4e978",
+    "jniLibs/arm64-v8a/libGenie.so": "3b170413596144bc399e81b6def4693ebf055a974fa6f2c9d58cb03cbd4206d1",
+    "jniLibs/arm64-v8a/libQnnHtp.so": "fc2c61b762e925f0bc90edda0bd469de92d167611559e6966f4fce97afe84821",
+    "jniLibs/arm64-v8a/libQnnHtpNetRunExtensions.so": "1a1ca1cf6b8934416f60569280e9cef4fc31fcc7ce4d6c255462786b05acee0b",
+    "jniLibs/arm64-v8a/libQnnHtpV73Stub.so": "3c8f4326fba210b08a74bf910a01292bea36577c6a26bc6262173c257bd47b4a",
+    "jniLibs/arm64-v8a/libQnnSystem.so": "49b8b4efbf44747363d0b86ecfed37c2b521d12a014411962d7cf2bf8a3f3cfe"
   }
 }
