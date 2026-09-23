@@ -45,7 +45,7 @@ public class MainActivity extends Activity {
     public static final  String  EXTRA_MAX_OUTPUT_TOKENS      = "max_output_tokens";
     public static final  String  EXTRA_CONTEXT_SIZE           = "context_size";
     private static final int     DEFAULT_MAX_ALL_TOKEN        = 256;
-    private static final int     DEFAULT_MAX_OUTPUT_TOKENS    = 48;
+    private static final int     DEFAULT_MAX_OUTPUT_TOKENS    = 128;
     private static final int     DEFAULT_CONTEXT_SIZE         = 512;
     private static final int     MAX_SUPPORTED_CONTEXT_SIZE   = 4096;
     private static final int     THREAD_COUNT                 = 4;
@@ -55,7 +55,6 @@ public class MainActivity extends Activity {
     private static final float   TEMPERATURE                  = 0.0f;
     private static final float   PRESENCE_PENALTY             = 0.0f;
     private static final int     MAX_HISTORY_TURNS            = 0;
-    private static final String  MODEL_ROOT                   = "/data/local/tmp/genie_qwen3_quality";
     private static final File    PUSHED_BATCH_INPUT_DIRECTORY =
             new File("/data/local/tmp/nlutest");
 
@@ -63,7 +62,7 @@ public class MainActivity extends Activity {
     private final Handler                      mainHandler  = new Handler(Looper.getMainLooper());
     private final List<BatchResult>            batchResults = new ArrayList<>();
     private final List<PromptBuilder.ChatTurn> chatHistory  = new ArrayList<>();
-   
+
     private TextView    outputView;
     private TextView    statusView;
     private TextView    metricsView;
@@ -90,7 +89,7 @@ public class MainActivity extends Activity {
     private Button      openFolderButton;
     private Button      shareFileButton;
 
-    private          GenieInferenceEngine engine;
+    private          GenieHtpEngine         engine;
     private          int                  contextSize;
     private          PromptBuilder        promptBuilder;
     private          String               engineSystemPrompt;
@@ -381,30 +380,24 @@ public class MainActivity extends Activity {
     }
 
     private String modelRoot() {
-        // App-private, per-channel models work with SELinux Enforcing and multi-user Android.
-        File privateRoot = new File(getFilesDir(), "models/" + BuildConfig.FLAVOR);
-        if (privateRoot.isDirectory()) return privateRoot.getAbsolutePath();
-        return MODEL_ROOT;
+        return GenieHtpEngine.defaultModelRoot(this);
     }
 
     private String defaultStatusText() {
-        int arch = resolveHtpArch();
+        int arch = GenieHtpEngine.htpArch();
         return "Genie: 在开始推理时加载"
                 + "\nRoute: Genie / QnnHtp / Qwen3-0.6B / HTP " + archLabel(arch)
                 + "\nHTP arch: " + arch + " (Build.SOC_MODEL='" + socModel()
                 + "', channel " + BuildConfig.FLAVOR + ")"
-                + "\nTarget device: " + Architecture.TARGET
+                + "\nTarget device: " + GenieHtpEngine.target()
                 + "\nModel root: " + modelRoot();
     }
 
-    /** Build.SOC_MODEL 的取值（本机 S32X1 上该属性为空串）。 */
+    /**
+     * Build.SOC_MODEL 的取值（本机 S32X1 上该属性为空串）。
+     */
     private static String socModel() {
         return Build.VERSION.SDK_INT >= 31 && Build.SOC_MODEL != null ? Build.SOC_MODEL : "";
-    }
-
-    /** Architecture is fixed by the selected Gradle source set. */
-    private static int resolveHtpArch() {
-        return Architecture.HTP_ARCH;
     }
 
     private static String archLabel(int arch) {
@@ -524,9 +517,19 @@ public class MainActivity extends Activity {
                         || maxOutputTokens != engineMaxOutputTokens) {
                     if (engine != null)
                         engine.close();
-                    engine = new GenieInferenceEngine(modelRoot(), DspRuntime.prepare(this), resolveHtpArch(), contextSize, maxAllToken,
-                            maxOutputTokens, THREAD_COUNT, GREEDY, TOP_K, TOP_P,
-                            TEMPERATURE, PRESENCE_PENALTY);
+                    engine = new GenieHtpEngine(this, EngineConfig.builder()
+                            .modelRoot(modelRoot())
+                            .contextSize(contextSize)
+                            .maxTokens(maxAllToken)
+                            .maxOutputTokens(maxOutputTokens)
+                            .threadCount(THREAD_COUNT)
+                            .greedy(GREEDY)
+                            .topK(TOP_K)
+                            .topP(TOP_P)
+                            .temperature(TEMPERATURE)
+                            .presencePenalty(PRESENCE_PENALTY)
+                            .build());
+                    engine.prepare();
                     engineSystemPrompt = builtSystemPrompt;
                     engineMaxAllToken = maxAllToken;
                     engineMaxOutputTokens = maxOutputTokens;
@@ -855,5 +858,10 @@ public class MainActivity extends Activity {
                     + "close the window";
 
     private static final String SYSTEM_PROMPT =
-            "You are a multilingual vehicle control assistant. Extract intent and slots from user commands in any language. Always respond with English JSON only. Do not think or explain.";
+            "English request classifier.\n" +
+                    "Unsafe/illegal/harmful -> REJECT\n" +
+                    "Supported vehicle control -> exact command\n" +
+                    "Otherwise -> UNKNOWN\n" +
+                    "Priority: REJECT > vehicle command > UNKNOWN.\n" +
+                    "Output only the result.\n";
 }

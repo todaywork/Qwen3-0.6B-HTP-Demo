@@ -1,0 +1,73 @@
+plugins {
+    id "com.android.library"
+}
+
+// Genie HTP 推理库：Genie/QNN 运行时 + JNI 桥 + 四渠道 so。
+// 产出 AAR 按渠道区分：geniehtp-v{68|73}-qnn{234|246}-release.aar
+android {
+    // namespace 与源码包名（com.qairt.qwen3htp）刻意不同：
+    // 避免与集成方 app 的 BuildConfig 同名冲突；JNI 函数名只取决于源码包名，不受影响。
+    namespace "com.qairt.geniehtp.lib"
+    compileSdk 35
+
+    defaultConfig {
+        minSdk 26
+        targetSdk 35
+
+        ndk {
+            abiFilters "arm64-v8a"
+        }
+
+        // Genie HTP "use-mmap" switch; default true. Override per build with
+        // -PuseMmap=false (e.g. gradlew :geniehtp:assembleV68Qnn234Release -PuseMmap=false).
+        buildConfigField "boolean", "USE_MMAP", (project.findProperty("useMmap") ?: "true")
+
+        externalNativeBuild {
+            cmake {
+                cppFlags "-std=c++17 -fexceptions -frtti"
+            }
+        }
+    }
+
+    flavorDimensions "htp", "qnn"
+    productFlavors {
+        v68 {
+            dimension "htp"
+            externalNativeBuild.cmake.arguments "-DHTP_ARCH=68"
+        }
+        v73 {
+            dimension "htp"
+            externalNativeBuild.cmake.arguments "-DHTP_ARCH=73"
+        }
+        qnn234 {
+            dimension "qnn"
+            externalNativeBuild.cmake.arguments "-DQNN_VER=234"
+        }
+        qnn246 {
+            dimension "qnn"
+            externalNativeBuild.cmake.arguments "-DQNN_VER=246"
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    // Only flavor-specific runtime directories ship in the AAR.
+    sourceSets {
+        main {
+            jniLibs.srcDirs = []
+            assets.srcDirs = []
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+            version "3.22.1"
+        }
+    }
+}
+
+dependencies {
+}

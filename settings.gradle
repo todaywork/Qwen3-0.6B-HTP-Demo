@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Qwen3HtpDemo"
 include ":app"
+include ":geniehtp"
