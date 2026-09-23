@@ -76,7 +76,7 @@ echo  接下来请在设备上点击 App 的【开始】按钮
 echo ============================================================
 echo.
 
-%PYTHON_EXE% "%~dp0run_batch_inference.py" --input-excel "!EXCEL_PATH!" !SERIAL_ARG!
+%PYTHON_EXE% "%~dp0run_batch_inference.py" --input-excel "!EXCEL_PATH!" --clean-device-history !SERIAL_ARG!
 set "EXIT_CODE=%ERRORLEVEL%"
 
 echo.
