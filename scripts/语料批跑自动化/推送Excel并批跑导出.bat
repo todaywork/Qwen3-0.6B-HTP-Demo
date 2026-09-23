@@ -41,7 +41,7 @@ rem ---- 选择 Excel：序号 或 完整路径 ----
 echo.
 set "EXCEL_PATH="
 set /p "CHOICE=输入序号选择文件，或直接输入/拖入 Excel 完整路径: "
-set "CHOICE=!CHOICE:"=!"
+if defined CHOICE set "CHOICE=!CHOICE:"=!"
 
 rem 纯数字且在范围内 → 选目录内文件
 set "IS_NUMBER=1"
@@ -62,7 +62,7 @@ rem ---- 设备序列号（可选）----
 echo.
 set "SERIAL="
 set /p "SERIAL=输入设备序列号（多设备时必填，单设备直接回车）: "
-set "SERIAL=!SERIAL:"=!"
+if defined SERIAL set "SERIAL=!SERIAL:"=!"
 
 set "SERIAL_ARG="
 if defined SERIAL set "SERIAL_ARG=--serial !SERIAL!"
