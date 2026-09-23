@@ -2,6 +2,8 @@ plugins {
     id "com.android.application"
 }
 
+// 纯外壳 App：UI + 批量测试工具。推理能力全部来自 :geniehtp library（AAR）。
+// 渠道 flavor 与 library 保持一致，Gradle 会按渠道名自动匹配依赖变体。
 android {
     namespace "com.qairt.qwen3htp"
     compileSdk 35
@@ -12,16 +14,6 @@ android {
         targetSdk 35
         versionCode 1
         versionName "1.0"
-
-        ndk {
-            abiFilters "arm64-v8a"
-        }
-
-        externalNativeBuild {
-            cmake {
-                cppFlags "-std=c++17 -fexceptions -frtti"
-            }
-        }
     }
 
     flavorDimensions "htp", "qnn"
@@ -29,22 +21,18 @@ android {
         v68 {
             dimension "htp"
             versionNameSuffix "-v68"
-            externalNativeBuild.cmake.arguments "-DHTP_ARCH=68"
         }
         v73 {
             dimension "htp"
             versionNameSuffix "-v73"
-            externalNativeBuild.cmake.arguments "-DHTP_ARCH=73"
         }
         qnn234 {
             dimension "qnn"
             versionNameSuffix "-qnn234"
-            externalNativeBuild.cmake.arguments "-DQNN_VER=234"
         }
         qnn246 {
             dimension "qnn"
             versionNameSuffix "-qnn246"
-            externalNativeBuild.cmake.arguments "-DQNN_VER=246"
         }
     }
 
@@ -60,7 +48,8 @@ android {
         }
     }
 
-    // Legacy mixed runtime directories are intentionally excluded from every APK.
+    // Legacy mixed runtime directories under app/src/main/{jniLibs,assets} are
+    // intentionally excluded from every APK (they shadow the library's channel so).
     sourceSets {
         main {
             jniLibs.srcDirs = []
@@ -72,13 +61,6 @@ android {
         buildConfig true
     }
 
-    externalNativeBuild {
-        cmake {
-            path "src/main/cpp/CMakeLists.txt"
-            version "3.22.1"
-        }
-    }
-
     packaging {
         jniLibs {
             useLegacyPackaging false
@@ -87,5 +69,6 @@ android {
 }
 
 dependencies {
+    implementation project(":geniehtp")
     implementation "androidx.core:core:1.13.1"
 }
