@@ -65,7 +65,6 @@ public class MainActivity extends Activity {
 
     private TextView    outputView;
     private TextView    statusView;
-    private TextView    metricsView;
     private TextView    progressTextView;
     private TextView    exportStatusView;
     private TextView    exportPathView;
@@ -281,11 +280,6 @@ public class MainActivity extends Activity {
         progressCard.addView(progressBar, new LinearLayout.LayoutParams(-1, -2));
 
         LinearLayout resultCard = addCard(root, "推理结果");
-        metricsView = new TextView(this);
-        metricsView.setTextSize(14);
-        metricsView.setTextColor(Color.rgb(31, 41, 55));
-        metricsView.setText(defaultMetricsText(resolveInitialMaxOutputTokens()));
-        resultCard.addView(metricsView, new LinearLayout.LayoutParams(-1, -2));
         outputView = new TextView(this);
         outputView.setTextSize(15);
         outputView.setMovementMethod(new ScrollingMovementMethod());
@@ -404,13 +398,6 @@ public class MainActivity extends Activity {
         return "V" + arch;
     }
 
-    private String defaultMetricsText(int maxOutputTokens) {
-        return "性能指标：\n输出 Token 上限：" + maxOutputTokens + "\n"
-                + "会话初始化耗时：-\n单条推理耗时：-\n端到端耗时：-\n"
-                + "首 Token 延迟：-\n输入 Token 数：-\n生成 Token 数：-\n"
-                + "Prefill 吞吐：-\nDecode 吞吐：-\n输出字符速度：-";
-    }
-
     private int resolveInitialMaxAllToken() {
         int value = getIntent().getIntExtra(EXTRA_MAX_ALL_TOKEN, DEFAULT_MAX_ALL_TOKEN);
         return value >= 1 && value <= contextSize
@@ -504,7 +491,6 @@ public class MainActivity extends Activity {
         exportPathView.setText("文件：-");
         openFolderButton.setEnabled(false);
         shareFileButton.setEnabled(false);
-        metricsView.setText(defaultMetricsText(maxOutputTokens));
         outputView.setText("推理结果会显示在这里。");
         setBusy(true);
 
@@ -609,7 +595,6 @@ public class MainActivity extends Activity {
                 Log.e(TAG, "startBatch failed", t);
                 mainHandler.post(() -> {
                     outputView.setText("推理失败：\n" + t);
-                    metricsView.setText("性能指标：\n推理失败");
                     exportStatusView.setText("状态：生成失败");
                     setBusy(false);
                 });
@@ -727,10 +712,16 @@ public class MainActivity extends Activity {
         progressTextView.setText("当前进度：" + current + " / " + total + "\n当前语料：" + prompt);
     }
 
+    private static final int MAX_DISPLAYED_RESULTS = 10;
+
     private void appendBatchResult(BatchResult result, int total) {
         updateProgress(result.index, total, result.prompt);
-        metricsView.setText(MetricsText.formatForUi(result.metrics));
-        outputView.setText(formatAllResults());
+        // 结果列表最多刷新前 10 条；第 11 条时再刷新一次给出提示，之后不再刷新，
+        // 避免大批量时全量重建文本导致界面卡顿。每条语料的性能指标随结果块一起显示，
+        // 完整结果始终写入导出 Excel。
+        if (result.index <= MAX_DISPLAYED_RESULTS + 1) {
+            outputView.setText(formatAllResults());
+        }
     }
 
     private String formatBatchResult(BatchResult result) {
@@ -750,10 +741,15 @@ public class MainActivity extends Activity {
 
     private String formatAllResults() {
         StringBuilder out = new StringBuilder();
-        for (BatchResult result : batchResults) {
+        int shown = Math.min(batchResults.size(), MAX_DISPLAYED_RESULTS);
+        for (int i = 0; i < shown; i++) {
             if (out.length() > 0)
                 out.append("\n\n");
-            out.append(formatBatchResult(result));
+            out.append(formatBatchResult(batchResults.get(i)));
+        }
+        if (batchResults.size() > MAX_DISPLAYED_RESULTS) {
+            out.append("\n\n…… 界面仅显示前 ").append(MAX_DISPLAYED_RESULTS)
+                    .append(" 条，后续结果不再刷新，完整结果见导出 Excel。");
         }
         return out.toString();
     }
@@ -786,7 +782,6 @@ public class MainActivity extends Activity {
         } catch (IllegalArgumentException ignored) {
             maxOutputTokens = resolveInitialMaxOutputTokens();
         }
-        metricsView.setText(defaultMetricsText(maxOutputTokens));
         outputView.setText("推理结果会显示在这里。");
         exportStatusView.setText("状态：未生成");
         exportPathView.setText("文件：-");

@@ -4,7 +4,7 @@ package com.qairt.qwen3htp;
  * 推理引擎配置。通过 {@link Builder} 构建；未设置的项使用与 Demo 一致的默认值。
  *
  * <p>useMmap 为 {@code null} 时使用 AAR 编译期开关（BuildConfig.USE_MMAP，
- * 可用 -PuseMmap=false 出包）；显式设置 true/false 则运行期覆盖。
+ * 按渠道在 geniehtp/build.gradle 的 productFlavors 中写死）；显式设置 true/false 则运行期覆盖。
  * 模型根目录缺省时由 {@link GenieHtpEngine#defaultModelRoot} 解析。
  */
 public final class EngineConfig {

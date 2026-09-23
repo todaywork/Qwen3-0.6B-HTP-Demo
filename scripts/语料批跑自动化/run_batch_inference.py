@@ -116,7 +116,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--serial", help="adb device serial")
     parser.add_argument("--max-all-token", type=int, default=256)
     parser.add_argument("--context-size", type=int, default=512)
-    parser.add_argument("--click-timeout-seconds", type=int, default=600)
+    parser.add_argument("--click-timeout-seconds", type=int, default=0,
+                        help="Seconds to wait for the app's Start button; 0 waits forever")
     parser.add_argument("--inference-timeout-seconds", type=int, default=0)
     parser.add_argument("--poll-interval-seconds", type=int, default=2)
     parser.add_argument("--clean-device-history", action="store_true")
@@ -359,7 +360,7 @@ def run_automation(args: argparse.Namespace) -> None:
     input_excel = resolve_input_excel(args, script_directory)
     validate_integer("max-all-token", args.max_all_token, 1, 4096)
     validate_integer("context-size", args.context_size, 1, 4096)
-    validate_integer("click-timeout-seconds", args.click_timeout_seconds, 1, 86400)
+    validate_integer("click-timeout-seconds", args.click_timeout_seconds, 0, 86400)
     validate_integer(
         "inference-timeout-seconds", args.inference_timeout_seconds, 0, 604800
     )
@@ -431,6 +432,9 @@ def run_automation(args: argparse.Namespace) -> None:
         args.poll_interval_seconds,
     )
     stage(f"Detected: {started_event}")
+    batch_start_wall = time.strftime("%Y-%m-%d %H:%M:%S")
+    batch_start_mono = time.monotonic()
+    stage(f"批跑开始时间: {batch_start_wall}")
     stage("Batch inference is running; monitoring the completion keyword...")
 
     completed_event = wait_for_completed_event(
@@ -440,6 +444,14 @@ def run_automation(args: argparse.Namespace) -> None:
         args.poll_interval_seconds,
     )
     stage(f"Detected: {completed_event}")
+    batch_end_wall = time.strftime("%Y-%m-%d %H:%M:%S")
+    elapsed_seconds = time.monotonic() - batch_start_mono
+    stage(f"批跑完成时间: {batch_end_wall}")
+    if elapsed_seconds >= 60:
+        stage(f"批跑总耗时: {int(elapsed_seconds // 60)} 分 {elapsed_seconds % 60:.1f} 秒"
+              f"（共 {elapsed_seconds:.1f} 秒）")
+    else:
+        stage(f"批跑总耗时: {elapsed_seconds:.1f} 秒")
     event_match = re.search(
         r"EVENT=COMPLETED\s+status=(\S+)\s+processed=(\d+)\s+"
         r"failed=(\d+)\s+total=(\d+)\s+output=(\S+)",

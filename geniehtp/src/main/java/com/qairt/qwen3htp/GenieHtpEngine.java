@@ -57,7 +57,7 @@ public final class GenieHtpEngine implements AutoCloseable {
         return BuildConfig.FLAVOR;
     }
 
-    /** 本 AAR 编译期的 use-mmap 默认值（-PuseMmap 出包开关）。 */
+    /** 本 AAR 编译期的 use-mmap 默认值（按渠道写死于 build.gradle productFlavors）。 */
     public static boolean compileTimeUseMmap() {
         return BuildConfig.USE_MMAP;
     }

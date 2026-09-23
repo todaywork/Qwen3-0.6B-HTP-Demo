@@ -79,7 +79,7 @@ py -3 .\scripts\语料批跑自动化\run_batch_inference.py `
   --inference-timeout-seconds 7200
 ```
 
-`--inference-timeout-seconds` 默认为 `0`，表示不限制批量推理耗时。等待期间可使用 `Ctrl+C` 停止电脑端脚本；这不会自动停止设备上的推理。
+`--click-timeout-seconds` 和 `--inference-timeout-seconds` 默认均为 `0`，表示不限制等待【开始】点击的时间和批量推理耗时。等待期间可使用 `Ctrl+C` 停止电脑端脚本；这不会自动停止设备上的推理。
 
 ## 自动化事件
 

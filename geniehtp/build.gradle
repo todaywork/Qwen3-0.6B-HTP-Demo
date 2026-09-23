@@ -18,10 +18,6 @@ android {
             abiFilters "arm64-v8a"
         }
 
-        // Genie HTP "use-mmap" switch; default true. Override per build with
-        // -PuseMmap=false (e.g. gradlew :geniehtp:assembleV68Qnn234Release -PuseMmap=false).
-        buildConfigField "boolean", "USE_MMAP", (project.findProperty("useMmap") ?: "true")
-
         externalNativeBuild {
             cmake {
                 cppFlags "-std=c++17 -fexceptions -frtti"
@@ -31,12 +27,16 @@ android {
 
     flavorDimensions "htp", "qnn"
     productFlavors {
+        // l946车机 QNN 2.46渠道关闭内存映射，需将USE_MMAP设为false
         v68 {
             dimension "htp"
+            // Genie HTP "use-mmap" 开关：按渠道写死，不再支持 -PuseMmap。
+            buildConfigField "boolean", "USE_MMAP", "true"
             externalNativeBuild.cmake.arguments "-DHTP_ARCH=68"
         }
         v73 {
             dimension "htp"
+            buildConfigField "boolean", "USE_MMAP", "true"
             externalNativeBuild.cmake.arguments "-DHTP_ARCH=73"
         }
         qnn234 {
